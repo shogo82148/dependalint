@@ -5,6 +5,7 @@ import (
 	"io"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v4"
@@ -303,8 +304,11 @@ func (v *validator) branchName(n *yaml.Node, p string) {
 			v.enum(z, q, set("lowercase", "uppercase"))
 		case "max-length":
 			if v.integer(z, q) {
-				var x int
-				fmt.Sscan(z.Value, &x)
+				x, err := strconv.Atoi(z.Value)
+				if err != nil {
+					v.add(z, q, "must be a base-10 integer")
+					break
+				}
 				if x < 20 || x > 244 {
 					v.add(z, q, "must be between 20 and 244")
 				}
@@ -468,8 +472,10 @@ func (v *validator) integer(n *yaml.Node, p string) bool {
 }
 func (v *validator) nonNegativeInt(n *yaml.Node, p string) {
 	if v.integer(n, p) {
-		var x int
-		if _, e := fmt.Sscan(n.Value, &x); e != nil || x < 0 {
+		x, err := strconv.Atoi(n.Value)
+		if err != nil {
+			v.add(n, p, "must be a base-10 integer")
+		} else if x < 0 {
 			v.add(n, p, "must be a non-negative integer")
 		}
 	}

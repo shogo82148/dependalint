@@ -108,3 +108,19 @@ func TestLintEmptyConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestLintRejectsNonDecimalIntegerSyntax(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    pull-request-branch-name:
+      max-length: 1_000
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[0].pull-request-branch-name.max-length" || ds[0].Message != "must be a base-10 integer" {
+		t.Fatalf("got %#v", ds)
+	}
+}
