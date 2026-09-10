@@ -13,12 +13,12 @@ func main() { os.Exit(run()) }
 
 func run() int {
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "Usage: dependalint [FILE ...]\n\nLint Dependabot configuration files. With no FILE, .github/dependabot.yml is used.\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: dependalint [FILE ...]\n\nLint Dependabot configuration files. With no FILE, .github/dependabot.yml and .github/dependabot.yaml are checked.\n")
 	}
 	flag.Parse()
 	files := flag.Args()
 	if len(files) == 0 {
-		files = []string{".github/dependabot.yml"}
+		files = defaultFiles(".")
 	}
 	bad := false
 	for _, name := range files {
@@ -50,4 +50,22 @@ func run() int {
 		return 1
 	}
 	return 0
+}
+
+func defaultFiles(root string) []string {
+	candidates := []string{
+		filepath.Join(".github", "dependabot.yml"),
+		filepath.Join(".github", "dependabot.yaml"),
+	}
+	var files []string
+	for _, name := range candidates {
+		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
+			files = append(files, name)
+		}
+	}
+	if len(files) == 0 {
+		// Keep the previous error message when no default configuration exists.
+		return candidates[:1]
+	}
+	return files
 }
