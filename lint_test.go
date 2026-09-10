@@ -97,6 +97,29 @@ updates:
 	}
 }
 
+func TestLintRejectsParentDirectoryReferences(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/../outside"
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directories: ["/packages/../outside"]
+    schedule:
+      interval: weekly
+`
+	ds := LintAt(strings.NewReader(config), t.TempDir())
+	if len(ds) != 2 {
+		t.Fatalf("got %d diagnostics, want 2: %#v", len(ds), ds)
+	}
+	for _, d := range ds {
+		if d.Message != `must not include ".."` {
+			t.Errorf("got %#v", d)
+		}
+	}
+}
+
 func TestLintReportsIndependentProblems(t *testing.T) {
 	config := `version: "2"
 unknown: true

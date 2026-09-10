@@ -200,6 +200,10 @@ func (v *validator) update(n *yaml.Node, p string) {
 }
 
 func (v *validator) directory(n *yaml.Node, p string, allowGlob bool) {
+	if strings.Contains(n.Value, "..") {
+		v.add(n, p, `must not include ".."`)
+		return
+	}
 	name := filepath.Join(v.root, filepath.FromSlash(strings.TrimPrefix(n.Value, "/")))
 	matches := []string{name}
 	if strings.ContainsAny(n.Value, "*?[") {
