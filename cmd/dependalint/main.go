@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/shogo82148/dependalint"
 )
@@ -27,7 +28,11 @@ func run() int {
 			bad = true
 			continue
 		}
-		ds := dependalint.Lint(f)
+		root := "."
+		if filepath.Base(filepath.Dir(name)) == ".github" {
+			root = filepath.Dir(filepath.Dir(name))
+		}
+		ds := dependalint.LintAt(f, root)
 		f.Close()
 		for _, d := range ds {
 			line, col := d.Line, d.Column
