@@ -33,6 +33,8 @@ var ecosystems = set("bazel", "bun", "bundler", "cargo", "composer", "conda", "d
 var intervals = set("daily", "weekly", "monthly", "quarterly", "semiannually", "yearly", "cron")
 var weekdays = set("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 var updateKeys = set("package-ecosystem", "directory", "directories", "schedule", "allow", "assignees", "commit-message", "cooldown", "groups", "ignore", "insecure-external-code-execution", "labels", "milestone", "multi-ecosystem-group", "open-pull-requests-limit", "patterns", "exclude-patterns", "pull-request-branch-name", "rebase-strategy", "registries", "target-branch", "exclude-paths", "vendor", "versioning-strategy")
+var timePattern = regexp.MustCompile(`^(?:[01]\d|2[0-3]):[0-5]\d$`)
+var groupNamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z_|-]*[A-Za-z])?$`)
 
 // Lint reads and validates a Dependabot configuration. It returns all problems it can find.
 func Lint(r io.Reader) []Diagnostic {
@@ -196,7 +198,7 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 		}
 	}
 	if t := value(n, "time"); t != nil {
-		if v.string(t, p+".time") && !regexp.MustCompile(`^(?:[01]\d|2[0-3]):[0-5]\d$`).MatchString(t.Value) {
+		if v.string(t, p+".time") && !timePattern.MatchString(t.Value) {
 			v.add(t, p+".time", "must use HH:MM 24-hour format")
 		}
 	}
@@ -256,11 +258,10 @@ func (v *validator) updateGroups(n *yaml.Node, p string) {
 		return
 	}
 	v.duplicates(n, p)
-	validName := regexp.MustCompile(`^[A-Za-z](?:[A-Za-z_|-]*[A-Za-z])?$`)
 	for i := 0; i < len(n.Content); i += 2 {
 		k, x := n.Content[i], n.Content[i+1]
 		q := p + "." + k.Value
-		if !validName.MatchString(k.Value) {
+		if !groupNamePattern.MatchString(k.Value) {
 			v.add(k, q, "group identifier must start and end with a letter and contain only letters, |, _, or -")
 		}
 		v.object(x, q, set("applies-to", "dependency-type", "exclude-patterns", "group-by", "patterns", "update-types"), func(key string, z *yaml.Node, r string) {
