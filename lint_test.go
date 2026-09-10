@@ -1,6 +1,8 @@
 package dependalint
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -37,8 +39,61 @@ updates:
     patterns: [nginx]
     multi-ecosystem-group: infrastructure
 `
-	if got := Lint(strings.NewReader(config)); len(got) != 0 {
+	root := t.TempDir()
+	for _, dir := range []string{"frontend", "admin"} {
+		if err := os.Mkdir(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := LintAt(strings.NewReader(config), root); len(got) != 0 {
 		t.Fatalf("Lint() returned diagnostics for valid config: %#v", got)
+	}
+}
+
+func TestLintChecksDirectoriesExist(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "present"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directories: ["/present", "/missing"]
+    schedule:
+      interval: weekly
+`
+	ds := LintAt(strings.NewReader(config), root)
+	if len(ds) != 1 || ds[0].Path != "updates[0].directories[1]" || ds[0].Message != "directory does not exist" {
+		t.Fatalf("got %#v", ds)
+	}
+}
+
+func TestLintOnlyAllowsGlobPatternsInDirectories(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "packages", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "packages", "*?["), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/packages/*"
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directories: ["/packages/*"]
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: '/packages/\*\?\['
+    schedule:
+      interval: weekly
+`
+	ds := LintAt(strings.NewReader(config), root)
+	if len(ds) != 1 || ds[0].Path != "updates[0].directory" || ds[0].Message != "does not support glob patterns" {
+		t.Fatalf("got %#v", ds)
 	}
 }
 

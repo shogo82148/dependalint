@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
@@ -30,6 +32,7 @@ type validator struct {
 	diags      []Diagnostic
 	registries map[string]bool
 	groups     map[string]bool
+	root       string
 }
 
 var ecosystems = set("bazel", "bun", "bundler", "cargo", "composer", "conda", "deno", "devcontainers", "docker", "docker-compose", "dotnet-sdk", "elm", "github-actions", "gitsubmodule", "gomod", "gradle", "helm", "julia", "maven", "mix", "nix", "npm", "nuget", "opentofu", "pip", "pre-commit", "pub", "rust-toolchain", "sbt", "swift", "terraform", "uv", "vcpkg")
@@ -41,6 +44,12 @@ var groupNamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z_|-]*[A-Za-z])?$`)
 
 // Lint reads and validates a Dependabot configuration. It returns all problems it can find.
 func Lint(r io.Reader) []Diagnostic {
+	return LintAt(r, ".")
+}
+
+// LintAt reads and validates a Dependabot configuration, resolving directory
+// and directories entries relative to root.
+func LintAt(r io.Reader, rootDir string) []Diagnostic {
 	var doc yaml.Node
 	dec := yaml.NewDecoder(r)
 	err := dec.Decode(&doc)
@@ -50,7 +59,7 @@ func Lint(r io.Reader) []Diagnostic {
 	if err == io.EOF || len(doc.Content) == 0 {
 		return []Diagnostic{{Message: "configuration is empty"}}
 	}
-	v := &validator{registries: map[string]bool{}, groups: map[string]bool{}}
+	v := &validator{registries: map[string]bool{}, groups: map[string]bool{}, root: rootDir}
 	root := deref(doc.Content[0])
 	if !v.kind(root, yaml.MappingNode, "", "mapping") {
 		return v.diags
@@ -111,10 +120,18 @@ func (v *validator) update(n *yaml.Node, p string) {
 		v.add(dirs, p+".directories", "cannot be used together with directory")
 	}
 	if dir != nil {
-		v.string(dir, p+".directory")
+		if v.string(dir, p+".directory") {
+			v.directory(dir, p+".directory", false)
+		}
 	}
 	if dirs != nil {
-		v.stringList(dirs, p+".directories", true)
+		if v.stringList(dirs, p+".directories", true) {
+			for i, dir := range dirs.Content {
+				if dir.Kind == yaml.ScalarNode && dir.Tag == "!!str" {
+					v.directory(dir, fmt.Sprintf("%s.directories[%d]", p, i), true)
+				}
+			}
+		}
 	}
 	sched := value(n, "schedule")
 	if sched == nil && value(n, "multi-ecosystem-group") == nil {
@@ -180,6 +197,47 @@ func (v *validator) update(n *yaml.Node, p string) {
 	if x := value(n, "groups"); x != nil {
 		v.updateGroups(x, p+".groups")
 	}
+}
+
+func (v *validator) directory(n *yaml.Node, p string, allowGlob bool) {
+	name := filepath.Join(v.root, filepath.FromSlash(strings.TrimPrefix(n.Value, "/")))
+	matches := []string{name}
+	if strings.ContainsAny(n.Value, "*?[") {
+		if !allowGlob && hasUnescapedGlobMeta(n.Value) {
+			v.add(n, p, "does not support glob patterns")
+			return
+		}
+		var err error
+		matches, err = filepath.Glob(name)
+		if err != nil {
+			v.add(n, p, "contains an invalid glob pattern")
+			return
+		}
+	}
+	for _, match := range matches {
+		if info, err := os.Stat(match); err == nil && info.IsDir() {
+			return
+		}
+	}
+	v.add(n, p, "directory does not exist")
+}
+
+func hasUnescapedGlobMeta(s string) bool {
+	escaped := false
+	for _, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if r == '*' || r == '?' || r == '[' {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *validator) schedule(n *yaml.Node, p string) {
