@@ -1,9 +1,11 @@
 package dependalint
 
 import (
+	"cmp"
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -81,11 +83,11 @@ func Lint(r io.Reader) []Diagnostic {
 			v.update(n, fmt.Sprintf("updates[%d]", i))
 		}
 	}
-	sort.SliceStable(v.diags, func(i, j int) bool {
-		if v.diags[i].Line == v.diags[j].Line {
-			return v.diags[i].Column < v.diags[j].Column
+	slices.SortStableFunc(v.diags, func(a, b Diagnostic) int {
+		if a.Line != b.Line {
+			return cmp.Compare(a.Line, b.Line)
 		}
-		return v.diags[i].Line < v.diags[j].Line
+		return cmp.Compare(a.Column, b.Column)
 	})
 	return v.diags
 }
