@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	// Embed the IANA time zone database so validation works without system zoneinfo files.
+	_ "time/tzdata"
 
 	"github.com/shogo82148/dependalint"
 )

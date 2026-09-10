@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -279,7 +280,12 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 		}
 	}
 	if z := value(n, "timezone"); z != nil {
-		v.string(z, p+".timezone")
+		if v.string(z, p+".timezone") {
+			_, err := time.LoadLocation(z.Value)
+			if z.Value == "" || z.Value == "Local" || err != nil {
+				v.add(z, p+".timezone", "must be a valid time zone database identifier")
+			}
+		}
 	}
 }
 
