@@ -202,3 +202,33 @@ updates:
 		t.Fatalf("got %#v", ds)
 	}
 }
+
+func TestLintRejectsInvalidScheduleTimezone(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+      timezone: Asia/Not_A_Real_Place
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[0].schedule.timezone" || ds[0].Message != "must be a valid time zone database identifier" {
+		t.Fatalf("got %#v", ds)
+	}
+}
+
+func TestLintRejectsLocalScheduleTimezone(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: daily
+      timezone: Local
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[0].schedule.timezone" || ds[0].Message != "must be a valid time zone database identifier" {
+		t.Fatalf("got %#v", ds)
+	}
+}
