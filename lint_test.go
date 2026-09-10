@@ -99,3 +99,12 @@ func TestLintMalformedYAML(t *testing.T) {
 		t.Fatalf("got %#v", ds)
 	}
 }
+
+func TestLintEmptyConfiguration(t *testing.T) {
+	for _, input := range []string{"", "  \n# comment only\n"} {
+		ds := Lint(strings.NewReader(input))
+		if len(ds) != 1 || ds[0].Message != "configuration is empty" {
+			t.Errorf("Lint(%q) = %#v", input, ds)
+		}
+	}
+}

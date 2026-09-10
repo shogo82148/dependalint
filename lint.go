@@ -40,10 +40,11 @@ var groupNamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z_|-]*[A-Za-z])?$`)
 func Lint(r io.Reader) []Diagnostic {
 	var doc yaml.Node
 	dec := yaml.NewDecoder(r)
-	if err := dec.Decode(&doc); err != nil {
+	err := dec.Decode(&doc)
+	if err != nil && err != io.EOF {
 		return []Diagnostic{{Message: "invalid YAML: " + err.Error()}}
 	}
-	if len(doc.Content) == 0 {
+	if err == io.EOF || len(doc.Content) == 0 {
 		return []Diagnostic{{Message: "configuration is empty"}}
 	}
 	v := &validator{registries: map[string]bool{}, groups: map[string]bool{}}
