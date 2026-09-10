@@ -12,7 +12,8 @@ go install github.com/shogo82148/dependalint/cmd/dependalint@latest
 
 ## Usage
 
-Run it without arguments to check `.github/dependabot.yml`:
+Run it without arguments to check any existing `.github/dependabot.yml` and
+`.github/dependabot.yaml` files:
 
 ```console
 dependalint
