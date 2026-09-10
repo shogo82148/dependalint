@@ -232,3 +232,72 @@ updates:
 		t.Fatalf("got %#v", ds)
 	}
 }
+
+func TestLintValidScheduleCronjobs(t *testing.T) {
+	for _, cronjob := range []string{
+		"0 9 * * *",
+		"0 9 * JAN,MAR MON-FRI",
+		"every day at 5pm",
+		"every weekday at 16:30",
+		"every 24 hours",
+	} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "` + cronjob + `"
+`
+		if ds := Lint(strings.NewReader(config)); len(ds) != 0 {
+			t.Errorf("cronjob %q: got %#v", cronjob, ds)
+		}
+	}
+}
+
+func TestLintRejectsScheduleCronjobsMoreFrequentThanDaily(t *testing.T) {
+	for _, cronjob := range []string{
+		"*/15 8-17 * JAN,MAR MON-FRI",
+		"0 9,17 * * *",
+		"every minute",
+		"every 3 hours",
+		"every 23 hours",
+	} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "` + cronjob + `"
+`
+		ds := Lint(strings.NewReader(config))
+		if len(ds) != 1 || ds[0].Path != "updates[0].schedule.cronjob" || ds[0].Message != "must have a minimum interval of 24 hours" {
+			t.Errorf("cronjob %q: got %#v", cronjob, ds)
+		}
+	}
+}
+
+func TestLintRejectsInvalidScheduleCronjobs(t *testing.T) {
+	for _, cronjob := range []string{
+		"",
+		"0 9 * *",
+		"60 9 * * *",
+		"0 24 * * *",
+		"0 9 * * * UTC",
+		"every nonsense",
+	} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "` + cronjob + `"
+`
+		ds := Lint(strings.NewReader(config))
+		if len(ds) != 1 || ds[0].Path != "updates[0].schedule.cronjob" || ds[0].Message != "must be a valid cron or natural expression" {
+			t.Errorf("cronjob %q: got %#v", cronjob, ds)
+		}
+	}
+}

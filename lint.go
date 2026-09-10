@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -42,6 +43,9 @@ var weekdays = set("monday", "tuesday", "wednesday", "thursday", "friday", "satu
 var updateKeys = set("package-ecosystem", "directory", "directories", "schedule", "allow", "assignees", "commit-message", "cooldown", "groups", "ignore", "insecure-external-code-execution", "labels", "milestone", "multi-ecosystem-group", "open-pull-requests-limit", "patterns", "exclude-patterns", "pull-request-branch-name", "rebase-strategy", "registries", "target-branch", "exclude-paths", "vendor", "versioning-strategy")
 var timePattern = regexp.MustCompile(`^(?:[01]\d|2[0-3]):[0-5]\d$`)
 var groupNamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z_|-]*[A-Za-z])?$`)
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+var naturalCronPattern = regexp.MustCompile(`(?i)^every\s+(?:(?:day|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s+at\s+(?:noon|midnight|(?:[01]?\d|2[0-3])(?::[0-5]\d)?|(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*[ap]m)|(?:[1-9]\d*\s+)?(?:minute|hour|day|week|month)s?)$`)
+var naturalCronIntervalPattern = regexp.MustCompile(`(?i)^every\s+(?:([1-9]\d*)\s+)?(minute|hour)s?$`)
 
 // Lint reads and validates a Dependabot configuration. It returns all problems it can find.
 func Lint(r io.Reader) []Diagnostic {
@@ -274,7 +278,11 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 		v.add(n, p+".cronjob", "is required with interval cron")
 	}
 	if c != nil {
-		v.string(c, p+".cronjob")
+		if v.string(c, p+".cronjob") {
+			if message := validateCronjob(c.Value); message != "" {
+				v.add(c, p+".cronjob", message)
+			}
+		}
 		if i.Value != "cron" {
 			v.add(c, p+".cronjob", "is only valid with interval cron")
 		}
@@ -287,6 +295,48 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 			}
 		}
 	}
+}
+
+func validateCronjob(s string) string {
+	if strings.TrimSpace(s) != s || s == "" {
+		return "must be a valid cron or natural expression"
+	}
+	if schedule, err := cronParser.Parse(s); err == nil {
+		if cronScheduleRunsMoreThanDaily(schedule) {
+			return "must have a minimum interval of 24 hours"
+		}
+		return ""
+	}
+	if !naturalCronPattern.MatchString(s) {
+		return "must be a valid cron or natural expression"
+	}
+	if match := naturalCronIntervalPattern.FindStringSubmatch(s); match != nil {
+		count := 1
+		if match[1] != "" {
+			count, _ = strconv.Atoi(match[1])
+		}
+		minimum := 24
+		if strings.EqualFold(match[2], "minute") {
+			minimum = 24 * 60
+		}
+		if count < minimum {
+			return "must have a minimum interval of 24 hours"
+		}
+	}
+	return ""
+}
+
+func cronScheduleRunsMoreThanDaily(schedule cron.Schedule) bool {
+	const occurrencesToCheck = 4096
+	previous := schedule.Next(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	for range occurrencesToCheck {
+		next := schedule.Next(previous)
+		if next.Sub(previous) < 24*time.Hour {
+			return true
+		}
+		previous = next
+	}
+	return false
 }
 
 func (v *validator) rules(n *yaml.Node, p string, allow bool) {
