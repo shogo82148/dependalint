@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v4"
 )
@@ -178,7 +179,7 @@ func (v *validator) update(n *yaml.Node, p string) {
 		v.object(x, p+".commit-message", set("prefix", "prefix-development", "include"), func(k string, z *yaml.Node, q string) {
 			if k == "include" {
 				v.enum(z, q, set("scope"))
-			} else if v.string(z, q) && len([]rune(z.Value)) > 50 {
+			} else if v.string(z, q) && utf8.RuneCountInString(z.Value) > 50 {
 				v.add(z, q, "must not exceed 50 characters")
 			}
 		})
@@ -384,11 +385,11 @@ func (v *validator) branchName(n *yaml.Node, p string) {
 				}
 			}
 		case "prefix":
-			if v.string(z, q) && len([]rune(z.Value)) > 50 {
+			if v.string(z, q) && utf8.RuneCountInString(z.Value) > 50 {
 				v.add(z, q, "must not exceed 50 characters")
 			}
 		case "template":
-			if v.string(z, q) && len([]rune(z.Value)) > 200 {
+			if v.string(z, q) && utf8.RuneCountInString(z.Value) > 200 {
 				v.add(z, q, "must not exceed 200 characters")
 			}
 		}
