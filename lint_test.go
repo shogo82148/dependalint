@@ -171,6 +171,35 @@ updates:
 	}
 }
 
+func TestLintEmptyRequiredStringReportedOnce(t *testing.T) {
+	// An empty package-ecosystem or interval must not also be reported as an
+	// invalid enumeration value.
+	config := `version: 2
+updates:
+  - package-ecosystem: ""
+    directory: /
+    schedule:
+      interval: ""
+`
+	ds := Lint(strings.NewReader(config))
+	var got []string
+	for _, d := range ds {
+		got = append(got, d.String())
+	}
+	want := map[string]bool{
+		"updates[0].package-ecosystem: must not be empty": true,
+		"updates[0].schedule.interval: must not be empty": true,
+	}
+	if len(ds) != len(want) {
+		t.Fatalf("got %d diagnostics, want %d: %#v", len(ds), len(want), got)
+	}
+	for _, g := range got {
+		if !want[g] {
+			t.Errorf("unexpected diagnostic %q; got %#v", g, got)
+		}
+	}
+}
+
 func TestLintGroupIdentifiers(t *testing.T) {
 	// Names accepted by Dependabot in the wild: digits and dots are allowed
 	// (e.g. grafana/grafana uses "go.opentelemetry.io" and "k8s.io").

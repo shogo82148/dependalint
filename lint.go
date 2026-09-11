@@ -582,6 +582,7 @@ func (v *validator) requiredString(n *yaml.Node, k, p string) *yaml.Node {
 	}
 	if x.Value == "" {
 		v.add(x, p+"."+k, "must not be empty")
+		return nil
 	}
 	return x
 }
