@@ -5,11 +5,23 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+
 	// Embed the IANA time zone database so validation works without system zoneinfo files.
 	_ "time/tzdata"
 
 	"github.com/shogo82148/dependalint"
 )
+
+// these variables are set by goreleaser
+var version string
+
+var versionFlag bool
+
+func init() {
+	flag.BoolVar(&versionFlag, "version", false, "Print the version and exit")
+}
 
 func main() { os.Exit(run()) }
 
@@ -18,6 +30,10 @@ func run() int {
 		fmt.Fprintf(flag.CommandLine.Output(), "Usage: dependalint [FILE ...]\n\nLint Dependabot configuration files. With no FILE, .github/dependabot.yml and .github/dependabot.yaml are checked.\n")
 	}
 	flag.Parse()
+	if versionFlag {
+		showVersion()
+		return 0
+	}
 	files := flag.Args()
 	if len(files) == 0 {
 		files = defaultFiles(".")
@@ -70,4 +86,19 @@ func defaultFiles(root string) []string {
 		return candidates[:1]
 	}
 	return files
+}
+
+func showVersion() {
+	fmt.Printf("dependalint version %s (%s/%s) %s\n", getVersion(), runtime.GOOS, runtime.GOARCH, runtime.Version())
+}
+
+func getVersion() string {
+	if version != "" {
+		return version
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	return info.Main.Version
 }
