@@ -171,6 +171,44 @@ updates:
 	}
 }
 
+func TestLintGroupIdentifiers(t *testing.T) {
+	// Names accepted by Dependabot in the wild: digits and dots are allowed
+	// (e.g. grafana/grafana uses "go.opentelemetry.io" and "k8s.io").
+	for _, name := range []string{"go.opentelemetry.io", "k8s.io", "k8s-dependencies", "d3", "prod|dev", "a"} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      ` + name + `:
+        patterns: ["*"]
+`
+		if ds := Lint(strings.NewReader(config)); len(ds) != 0 {
+			t.Errorf("group %q: got %#v, want no diagnostics", name, ds)
+		}
+	}
+
+	// Names that break the resulting Git branch name are still rejected.
+	for _, name := range []string{"GitHub Actions", ".leading", "trailing.", "-lead"} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      "` + name + `":
+        patterns: ["*"]
+`
+		ds := Lint(strings.NewReader(config))
+		if len(ds) != 1 || !strings.Contains(ds[0].Message, "group identifier") {
+			t.Errorf("group %q: got %#v, want a group identifier diagnostic", name, ds)
+		}
+	}
+}
+
 func TestLintMalformedYAML(t *testing.T) {
 	ds := Lint(strings.NewReader("version: [\n"))
 	if len(ds) != 1 || !strings.Contains(ds[0].Message, "invalid YAML") {

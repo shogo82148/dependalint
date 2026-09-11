@@ -43,7 +43,7 @@ var intervals = set("daily", "weekly", "monthly", "quarterly", "semiannually", "
 var weekdays = set("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 var updateKeys = set("package-ecosystem", "directory", "directories", "schedule", "allow", "assignees", "commit-message", "cooldown", "groups", "ignore", "insecure-external-code-execution", "labels", "milestone", "multi-ecosystem-group", "open-pull-requests-limit", "patterns", "exclude-patterns", "pull-request-branch-name", "rebase-strategy", "registries", "target-branch", "exclude-paths", "vendor", "versioning-strategy")
 var timePattern = regexp.MustCompile(`^(?:[01]\d|2[0-3]):[0-5]\d$`)
-var groupNamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z_|-]*[A-Za-z])?$`)
+var groupNamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._|-]*[A-Za-z0-9])?$`)
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 var naturalCronPattern = regexp.MustCompile(`(?i)^every\s+(?:(?:(?:day|weekday)|(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)(?:\s+(?:and|or)\s+(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?))*)\s+at\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|noon|midnight|(?:[01]?\d|2[0-3])(?::[0-5]\d)?|(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*[ap]m)|(?:[1-9]\d*\s+)?(?:minute|hour|day|week|month)s?)$`)
 var naturalCronIntervalPattern = regexp.MustCompile(`(?i)^every\s+(?:([1-9]\d*)\s+)?(minute|hour)s?$`)
@@ -437,7 +437,7 @@ func (v *validator) updateGroups(n *yaml.Node, p string) {
 		k, x := n.Content[i], n.Content[i+1]
 		q := p + "." + k.Value
 		if !groupNamePattern.MatchString(k.Value) {
-			v.add(k, q, "group identifier must start and end with a letter and contain only letters, |, _, or -")
+			v.add(k, q, "group identifier must start and end with a letter or digit and contain only letters, digits, ., |, _, or -")
 		}
 		v.object(x, q, set("applies-to", "dependency-type", "exclude-patterns", "group-by", "patterns", "update-types"), func(key string, z *yaml.Node, r string) {
 			switch key {
