@@ -240,6 +240,21 @@ func TestLintValidScheduleCronjobs(t *testing.T) {
 		"every day at 5pm",
 		"every weekday at 16:30",
 		"every 24 hours",
+		"@daily",
+		"0 0 L * *",
+		"0 0 last * *",
+		"0 0 -7-L * *",
+		"0 5 * * mon#1",
+		"0 7 * * fri#L",
+		"0 7 * * fri#-1",
+		"0 9 * * sun%2",
+		"0 9 * * sun%2+1",
+		"0 0 1-7 * mon&",
+		"~ 12 * * *",
+		"every day at five",
+		"every wed at 5 pm",
+		"every tuesday and monday at 5pm",
+		" 0 9 * * * ",
 	} {
 		config := `version: 2
 updates:
