@@ -3,10 +3,12 @@ name: dependalint
 on:
   push:
     paths:
-      - ".github/dependabot.yml"
+      - ".github/dependabot.yaml"
+      - ".github/workflows/dependalint.yaml"
   pull_request:
     paths:
-      - ".github/dependabot.yml"
+      - ".github/dependabot.yaml"
+      - ".github/workflows/dependalint.yaml"
 
 permissions:
   contents: read
