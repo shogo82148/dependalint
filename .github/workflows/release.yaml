@@ -52,7 +52,10 @@ jobs:
         with:
           go-version-file: go.mod
       - name: Install binst
-        run: go install github.com/binary-install/binstaller/cmd/binst@latest
+        # Pin to an immutable version. Update this only through a separate
+        # reviewed change (do not use @latest: a new release would run with a
+        # token that has contents: write and pull-requests: write).
+        run: go install github.com/binary-install/binstaller/cmd/binst@v0.12.0
       - name: Embed checksums for ${{ github.ref_name }}
         run: binst embed-checksums --config .config/binstaller.yml --version "${VERSION}" --mode download
       - name: Regenerate install.sh
