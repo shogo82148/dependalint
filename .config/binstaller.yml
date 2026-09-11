@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/binary-install/binstaller/main/schema/InstallSpec.json
+schema: v1
+repo: shogo82148/dependalint
+asset:
+  template: dependalint_${VERSION}_${OS}_${ARCH}${EXT}
+  default_extension: .tar.gz
+  rules:
+  - when:
+      os: windows
+    ext: .zip
+checksums:
+  algorithm: sha256
+  template: dependalint_${VERSION}_checksums.txt
+  embedded_checksums:
+    v0.1.0:
+    - filename: dependalint_0.1.0_darwin_amd64.tar.gz
+      hash: abfedb4b2083a412a87fbc3e6c70956f07b6b33a9e307dfa71593f3f9e7b3129
+    - filename: dependalint_0.1.0_darwin_arm64.tar.gz
+      hash: a289f0db5fdeb4251de6a91162b09c8693dc0563a3fb4ebdde884f0a32cc3b61
+    - filename: dependalint_0.1.0_linux_amd64.tar.gz
+      hash: 06163ab51232a485e8f315f355a5af211bd235a5041c690b76ac310bea07fb92
+    - filename: dependalint_0.1.0_linux_arm64.tar.gz
+      hash: 0ffcce7131d7d54208b6a27e3a3b83a6ccf8a7bcf98442c08d3d80a262f197ee
+    - filename: dependalint_0.1.0_windows_amd64.zip
+      hash: ed66d3844be67dbce01742b0885a6108eb2d837ded2aa1c00d39ca7c9969609c
+    - filename: dependalint_0.1.0_windows_arm64.zip
+      hash: dc807a9424ffccc16154b020343b1ad00b4c6a8a01dc20d6152c4e483b4f3264
