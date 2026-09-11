@@ -6,6 +6,25 @@ required values, enumerations, references, and option combinations.
 
 ## Install
 
+### Install script
+
+Download a prebuilt binary with the install script. It detects your OS/arch,
+verifies the download against an embedded checksum, and installs the binary.
+
+```console
+curl -sSfL https://raw.githubusercontent.com/shogo82148/dependalint/main/install.sh | sh -s -- -b /usr/local/bin
+```
+
+By default the binary is installed to `${HOME}/.local/bin`. Pass `-b <dir>` to
+choose another directory, and append a tag (e.g. `v0.1.0`) to pin a version
+instead of the latest release:
+
+```console
+curl -sSfL https://raw.githubusercontent.com/shogo82148/dependalint/main/install.sh | sh -s -- -b /usr/local/bin v0.1.0
+```
+
+### go install
+
 ```console
 go install github.com/shogo82148/dependalint/cmd/dependalint@latest
 ```
