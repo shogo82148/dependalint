@@ -415,7 +415,13 @@ EMBEDDED_CHECKSUMS="
 0.1.0:dependalint_0.1.0_linux_amd64.tar.gz:06163ab51232a485e8f315f355a5af211bd235a5041c690b76ac310bea07fb92
 0.1.0:dependalint_0.1.0_linux_arm64.tar.gz:0ffcce7131d7d54208b6a27e3a3b83a6ccf8a7bcf98442c08d3d80a262f197ee
 0.1.0:dependalint_0.1.0_windows_amd64.zip:ed66d3844be67dbce01742b0885a6108eb2d837ded2aa1c00d39ca7c9969609c
-0.1.0:dependalint_0.1.0_windows_arm64.zip:dc807a9424ffccc16154b020343b1ad00b4c6a8a01dc20d6152c4e483b4f3264"
+0.1.0:dependalint_0.1.0_windows_arm64.zip:dc807a9424ffccc16154b020343b1ad00b4c6a8a01dc20d6152c4e483b4f3264
+0.1.1:dependalint_0.1.1_darwin_amd64.tar.gz:33d290a3d968be1d196c205c004d6077cd1a356751d9116c1c9ba747f52eeac0
+0.1.1:dependalint_0.1.1_darwin_arm64.tar.gz:c4eb8927d17eb18e43d6d9f03c84ea98e20818e99c0ab2d7240b4386f8674a6d
+0.1.1:dependalint_0.1.1_linux_amd64.tar.gz:fa79c164e27b4052712d199e729c09eac6061027c83e5403fafe07ce69993a5a
+0.1.1:dependalint_0.1.1_linux_arm64.tar.gz:232f8cf3550bb467cf4d1bebb74aede3ac6442cbbd047d806773c19f9de7d1a3
+0.1.1:dependalint_0.1.1_windows_amd64.zip:cf969872ad8ac10e3d722c4a5821702567b35ef268206b989f129f430c98fbd4
+0.1.1:dependalint_0.1.1_windows_arm64.zip:8528b34073ff2e263e2b3b8c9b79902beb4f1f4bf4de07ad94f8bd3b88b99040"
 
 # Find embedded checksum for a given version and filename
 find_embedded_checksum() {
