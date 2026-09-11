@@ -232,3 +232,87 @@ updates:
 		t.Fatalf("got %#v", ds)
 	}
 }
+
+func TestLintValidScheduleCronjobs(t *testing.T) {
+	for _, cronjob := range []string{
+		"0 9 * * *",
+		"0 9 * JAN,MAR MON-FRI",
+		"every day at 5pm",
+		"every weekday at 16:30",
+		"every 24 hours",
+		"@daily",
+		"0 0 L * *",
+		"0 0 last * *",
+		"0 0 -7-L * *",
+		"0 5 * * mon#1",
+		"0 7 * * fri#L",
+		"0 7 * * fri#-1",
+		"0 9 * * sun%2",
+		"0 9 * * sun%2+1",
+		"0 0 1-7 * mon&",
+		"~ 12 * * *",
+		"every day at five",
+		"every wed at 5 pm",
+		"every tuesday and monday at 5pm",
+		" 0 9 * * * ",
+	} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "` + cronjob + `"
+`
+		if ds := Lint(strings.NewReader(config)); len(ds) != 0 {
+			t.Errorf("cronjob %q: got %#v", cronjob, ds)
+		}
+	}
+}
+
+func TestLintRejectsScheduleCronjobsMoreFrequentThanDaily(t *testing.T) {
+	for _, cronjob := range []string{
+		"*/15 8-17 * JAN,MAR MON-FRI",
+		"0 9,17 * * *",
+		"every minute",
+		"every 3 hours",
+		"every 23 hours",
+	} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "` + cronjob + `"
+`
+		ds := Lint(strings.NewReader(config))
+		if len(ds) != 1 || ds[0].Path != "updates[0].schedule.cronjob" || ds[0].Message != "must have a minimum interval of 24 hours" {
+			t.Errorf("cronjob %q: got %#v", cronjob, ds)
+		}
+	}
+}
+
+func TestLintRejectsInvalidScheduleCronjobs(t *testing.T) {
+	for _, cronjob := range []string{
+		"",
+		"0 9 * *",
+		"60 9 * * *",
+		"0 24 * * *",
+		"0 9 * * * UTC",
+		"every nonsense",
+	} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "` + cronjob + `"
+`
+		ds := Lint(strings.NewReader(config))
+		if len(ds) != 1 || ds[0].Path != "updates[0].schedule.cronjob" || ds[0].Message != "must be a valid cron or natural expression" {
+			t.Errorf("cronjob %q: got %#v", cronjob, ds)
+		}
+	}
+}

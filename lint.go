@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/robfig/cron/v3"
 	"go.yaml.in/yaml/v4"
 )
 
@@ -43,6 +44,11 @@ var weekdays = set("monday", "tuesday", "wednesday", "thursday", "friday", "satu
 var updateKeys = set("package-ecosystem", "directory", "directories", "schedule", "allow", "assignees", "commit-message", "cooldown", "groups", "ignore", "insecure-external-code-execution", "labels", "milestone", "multi-ecosystem-group", "open-pull-requests-limit", "patterns", "exclude-patterns", "pull-request-branch-name", "rebase-strategy", "registries", "target-branch", "exclude-paths", "vendor", "versioning-strategy")
 var timePattern = regexp.MustCompile(`^(?:[01]\d|2[0-3]):[0-5]\d$`)
 var groupNamePattern = regexp.MustCompile(`^[A-Za-z](?:[A-Za-z_|-]*[A-Za-z])?$`)
+var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
+var naturalCronPattern = regexp.MustCompile(`(?i)^every\s+(?:(?:(?:day|weekday)|(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)(?:\s+(?:and|or)\s+(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?))*)\s+at\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|noon|midnight|(?:[01]?\d|2[0-3])(?::[0-5]\d)?|(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*[ap]m)|(?:[1-9]\d*\s+)?(?:minute|hour|day|week|month)s?)$`)
+var naturalCronIntervalPattern = regexp.MustCompile(`(?i)^every\s+(?:([1-9]\d*)\s+)?(minute|hour)s?$`)
+var fugitLastDayPattern = regexp.MustCompile(`(?i)^(?:L|last|-([1-9]|[12]\d|3[01])-(?:L|last))$`)
+var fugitWeekdayPattern = regexp.MustCompile(`(?i)^([0-7]|sun(?:day)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?)(?:(?:#(?:[1-5]|-1|L|last))|(?:%[1-9]\d*(?:\+\d+)?))?$`)
 
 // Lint reads and validates a Dependabot configuration. It returns all problems it can find.
 func Lint(r io.Reader) []Diagnostic {
@@ -275,7 +281,11 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 		v.add(n, p+".cronjob", "is required with interval cron")
 	}
 	if c != nil {
-		v.string(c, p+".cronjob")
+		if v.string(c, p+".cronjob") {
+			if message := validateCronjob(c.Value); message != "" {
+				v.add(c, p+".cronjob", message)
+			}
+		}
 		if i.Value != "cron" {
 			v.add(c, p+".cronjob", "is only valid with interval cron")
 		}
@@ -288,6 +298,98 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 			}
 		}
 	}
+}
+
+func validateCronjob(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "must be a valid cron or natural expression"
+	}
+	if normalized, ok := normalizeFugitCron(s); ok {
+		if schedule, err := cronParser.Parse(normalized); err == nil {
+			if cronScheduleRunsMoreThanDaily(schedule) {
+				return "must have a minimum interval of 24 hours"
+			}
+			return ""
+		}
+	}
+	if schedule, err := cronParser.Parse(s); err == nil {
+		if cronScheduleRunsMoreThanDaily(schedule) {
+			return "must have a minimum interval of 24 hours"
+		}
+		return ""
+	}
+	if !naturalCronPattern.MatchString(s) {
+		return "must be a valid cron or natural expression"
+	}
+	if match := naturalCronIntervalPattern.FindStringSubmatch(s); match != nil {
+		count := 1
+		if match[1] != "" {
+			count, _ = strconv.Atoi(match[1])
+		}
+		minimum := 24
+		if strings.EqualFold(match[2], "minute") {
+			minimum = 24 * 60
+		}
+		if count < minimum {
+			return "must have a minimum interval of 24 hours"
+		}
+	}
+	return ""
+}
+
+func normalizeFugitCron(s string) (string, bool) {
+	specials := map[string]string{
+		"@yearly": "0 0 1 1 *", "@annually": "0 0 1 1 *",
+		"@monthly": "0 0 1 * *", "@weekly": "0 0 * * 0",
+		"@daily": "0 0 * * *", "@midnight": "0 0 * * *", "@noon": "0 12 * * *",
+	}
+	if normalized, ok := specials[strings.ToLower(s)]; ok {
+		return normalized, true
+	}
+	fields := strings.Fields(s)
+	if len(fields) != 5 {
+		return "", false
+	}
+	if fields[0] == "~" {
+		fields[0] = "0"
+	}
+	fields[2] = strings.TrimSuffix(fields[2], "&")
+	if match := fugitLastDayPattern.FindStringSubmatch(fields[2]); match != nil {
+		if match[1] == "" {
+			fields[2] = "28"
+		} else {
+			days, _ := strconv.Atoi(match[1])
+			fields[2] = fmt.Sprintf("%d-28", 28-days)
+		}
+	}
+	fields[4] = strings.TrimSuffix(fields[4], "&")
+	weekdays := strings.Split(fields[4], ",")
+	for index, weekday := range weekdays {
+		if !strings.ContainsAny(weekday, "#%") {
+			continue
+		}
+		match := fugitWeekdayPattern.FindStringSubmatch(weekday)
+		if match == nil {
+			return "", false
+		}
+		weekdays[index] = match[1]
+	}
+	fields[4] = strings.Join(weekdays, ",")
+	return strings.Join(fields, " "), true
+}
+
+func cronScheduleRunsMoreThanDaily(schedule cron.Schedule) bool {
+	const occurrencesToCheck = 4096
+	previous := schedule.Next(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	for range occurrencesToCheck {
+		next := schedule.Next(previous)
+		if next.Sub(previous) < 24*time.Hour {
+			return true
+		}
+		previous = next
+	}
+	return false
 }
 
 func (v *validator) rules(n *yaml.Node, p string, allow bool) {
