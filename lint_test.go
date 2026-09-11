@@ -209,6 +209,45 @@ updates:
 	}
 }
 
+func TestLintRegistriesWildcard(t *testing.T) {
+	// The scalar "*" wildcard selects every defined registry and is valid.
+	config := `version: 2
+registries:
+  npm-private:
+    type: npm-registry
+    url: https://registry.example.com
+    token: ${{secrets.NPM_TOKEN}}
+updates:
+  - package-ecosystem: npm
+    directory: /
+    registries: "*"
+    schedule:
+      interval: weekly
+`
+	if ds := Lint(strings.NewReader(config)); len(ds) != 0 {
+		t.Fatalf("registries: \"*\" should be valid, got %#v", ds)
+	}
+
+	// A bare scalar that is not the wildcard must be a list of names.
+	bad := `version: 2
+registries:
+  npm-private:
+    type: npm-registry
+    url: https://registry.example.com
+    token: ${{secrets.NPM_TOKEN}}
+updates:
+  - package-ecosystem: npm
+    directory: /
+    registries: npm-private
+    schedule:
+      interval: weekly
+`
+	ds := Lint(strings.NewReader(bad))
+	if len(ds) != 1 || ds[0].Path != "updates[0].registries" || !strings.Contains(ds[0].Message, `"*" wildcard`) {
+		t.Fatalf("got %#v", ds)
+	}
+}
+
 func TestLintMalformedYAML(t *testing.T) {
 	ds := Lint(strings.NewReader("version: [\n"))
 	if len(ds) != 1 || !strings.Contains(ds[0].Message, "invalid YAML") {

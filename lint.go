@@ -543,7 +543,13 @@ func (v *validator) registryDefinitions(n *yaml.Node) {
 	}
 }
 func (v *validator) registryRefs(n *yaml.Node, p string) {
-	if !v.kind(n, yaml.SequenceNode, p, "sequence") {
+	n = deref(n)
+	// registries may be the scalar "*" wildcard (use every defined registry)
+	// or a sequence of registry names.
+	if n.Kind != yaml.SequenceNode {
+		if n.Kind != yaml.ScalarNode || n.Tag != "!!str" || n.Value != "*" {
+			v.add(n, p, `must be a sequence of registry names or the "*" wildcard`)
+		}
 		return
 	}
 	for i, x := range n.Content {
