@@ -26,7 +26,6 @@ builds:
     goarch:
       - arm64
       - amd64
-      - "386"
 
 archives:
   - formats: [tar.gz]
