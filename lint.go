@@ -170,18 +170,18 @@ func (v *validator) update(n *yaml.Node, p string) {
 	}
 	if x := value(n, "vendor"); x != nil {
 		v.boolean(x, p+".vendor")
-		v.supportedBy(x, p+".vendor", eco, "", vendorEcosystems)
+		v.supportedBy(rawValue(n, "vendor"), p+".vendor", eco, "", vendorEcosystems)
 	}
 	if x := value(n, "insecure-external-code-execution"); x != nil {
 		v.enum(x, p+".insecure-external-code-execution", set("allow"))
-		v.supportedBy(x, p+".insecure-external-code-execution", eco, "", insecureExternalCodeExecutionEcosystems)
+		v.supportedBy(rawValue(n, "insecure-external-code-execution"), p+".insecure-external-code-execution", eco, "", insecureExternalCodeExecutionEcosystems)
 	}
 	if x := value(n, "rebase-strategy"); x != nil {
 		v.enum(x, p+".rebase-strategy", set("auto", "disabled"))
 	}
 	if x := value(n, "versioning-strategy"); x != nil {
 		v.enum(x, p+".versioning-strategy", set("auto", "increase", "increase-if-necessary", "lockfile-only", "widen"))
-		v.supportedBy(x, p+".versioning-strategy", eco, "", versioningStrategyEcosystems)
+		v.supportedBy(rawValue(n, "versioning-strategy"), p+".versioning-strategy", eco, "", versioningStrategyEcosystems)
 	}
 	if x := value(n, "target-branch"); x != nil {
 		v.string(x, p+".target-branch")
@@ -708,10 +708,16 @@ func (v *validator) add(n *yaml.Node, p, msg string) {
 	v.diags = append(v.diags, Diagnostic{Line: n.Line, Column: n.Column, Path: p, Message: msg})
 }
 func value(n *yaml.Node, key string) *yaml.Node {
+	return deref(rawValue(n, key))
+}
+
+// rawValue is like value but does not resolve an alias value, so diagnostics
+// can point at the alias rather than at its anchor.
+func rawValue(n *yaml.Node, key string) *yaml.Node {
 	n = deref(n)
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == key {
-			return deref(n.Content[i+1])
+			return n.Content[i+1]
 		}
 	}
 	return nil

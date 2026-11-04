@@ -512,3 +512,23 @@ updates:
 		t.Fatalf("got %#v", ds)
 	}
 }
+
+func TestLintEcosystemSpecificOptionReportedAtAlias(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: bundler
+    directory: /
+    schedule:
+      interval: weekly
+    vendor: &vendor true
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    vendor: *vendor
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[1].vendor" || ds[0].Line != 12 {
+		t.Fatalf("got %#v, want one diagnostic at line 12", ds)
+	}
+}
