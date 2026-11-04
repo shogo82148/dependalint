@@ -50,6 +50,26 @@ updates:
 	}
 }
 
+func TestLintValidAgentPackageManager(t *testing.T) {
+	config := `version: 2
+registries:
+  github-octocat:
+    type: git
+    url: https://github.com
+    username: x-access-token
+    password: ${{secrets.MY_GITHUB_PERSONAL_TOKEN}}
+updates:
+  - package-ecosystem: apm
+    directory: /
+    schedule:
+      interval: weekly
+    registries: [github-octocat]
+`
+	if got := Lint(strings.NewReader(config)); len(got) != 0 {
+		t.Fatalf("Lint() returned diagnostics for valid config: %#v", got)
+	}
+}
+
 func TestLintChecksDirectoriesExist(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "present"), 0o755); err != nil {
