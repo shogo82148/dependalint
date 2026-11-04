@@ -570,3 +570,90 @@ updates:
 		}
 	}
 }
+
+func TestLintAliasedNestedScalars(t *testing.T) {
+	// The first update defines anchors on valid values; the second update
+	// reuses them inside nested options. Valid reuse must be accepted and
+	// invalid reuse must be reported at the alias.
+	long := strings.Repeat("a", 60)
+	tests := []struct {
+		use, path, message string
+	}{
+		{"commit-message: {prefix: *p, include: *scope}", "", ""},
+		{"pull-request-branch-name: {prefix: *p, max-length: *n}", "", ""},
+		{"cooldown: {default-days: *small, exclude: *list}", "", ""},
+		{"registries: [*r]", "", ""},
+		{"groups: {h: {applies-to: *a}}", "", ""},
+		{"groups: {h: *group}", "", ""},
+		{"labels: [*p]", "", ""},
+		{"commit-message: {prefix: *n}", "updates[1].commit-message.prefix", "must be a string"},
+		{"commit-message: {prefix: *long}", "updates[1].commit-message.prefix", "must not exceed 50 characters"},
+		{"commit-message: {include: *p}", "updates[1].commit-message.include", "must be one of scope"},
+		{"pull-request-branch-name: {max-length: *p}", "updates[1].pull-request-branch-name.max-length", "must be an integer"},
+		{"pull-request-branch-name: {max-length: *small}", "updates[1].pull-request-branch-name.max-length", "must be between 20 and 244"},
+		{"pull-request-branch-name: {prefix: *long}", "updates[1].pull-request-branch-name.prefix", "must not exceed 50 characters"},
+		{"cooldown: {default-days: *p}", "updates[1].cooldown.default-days", "must be an integer"},
+		{"registries: [*a]", "updates[1].registries[0]", `references undefined registry "version-updates"`},
+		{"groups: {h: {applies-to: *p}}", "updates[1].groups.h.applies-to", "must be one of security-updates, version-updates"},
+		{"labels: [*n]", "updates[1].labels[0]", "must be a string"},
+	}
+	for _, tt := range tests {
+		config := `version: 2
+registries:
+  reg:
+    type: npm-registry
+    url: https://example.com
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: &long ` + long + `
+    open-pull-requests-limit: &small 5
+    labels: &list [a]
+    commit-message:
+      prefix: &p deps
+      include: &scope scope
+    pull-request-branch-name:
+      max-length: &n 30
+    registries: [&r reg]
+    groups:
+      g: &group
+        applies-to: &a version-updates
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    ` + tt.use + `
+`
+		ds := Lint(strings.NewReader(config))
+		if tt.path == "" {
+			if len(ds) != 0 {
+				t.Errorf("%s: got %#v, want no diagnostics", tt.use, ds)
+			}
+			continue
+		}
+		if len(ds) != 1 || ds[0].Path != tt.path || ds[0].Message != tt.message || ds[0].Line != 27 {
+			t.Errorf("%s: got %#v, want %s: %s on line 27", tt.use, ds, tt.path, tt.message)
+		}
+	}
+}
+
+func TestLintAliasedDirectories(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: &dir /
+    target-branch: &missing missing
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directories: [*dir, *missing]
+    schedule:
+      interval: weekly
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[1].directories[1]" || ds[0].Message != "directory does not exist" || ds[0].Line != 9 {
+		t.Fatalf("got %#v", ds)
+	}
+}
