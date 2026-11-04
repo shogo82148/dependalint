@@ -179,6 +179,7 @@ updates:
     directory: /
     registries: [missing]
     multi-ecosystem-group: missing
+    patterns: ["*"]
 `
 	ds := Lint(strings.NewReader(config))
 	if len(ds) != 2 {
@@ -221,9 +222,11 @@ updates:
 }
 
 func TestLintGroupIdentifiers(t *testing.T) {
-	// Names accepted by Dependabot in the wild: digits and dots are allowed
-	// (e.g. grafana/grafana uses "go.opentelemetry.io" and "k8s.io").
-	for _, name := range []string{"go.opentelemetry.io", "k8s.io", "k8s-dependencies", "d3", "prod|dev", "a"} {
+	// Names accepted by Dependabot in the wild. Dependabot slugifies them for
+	// branch names, e.g. grafana/grafana uses "go.opentelemetry.io",
+	// elastic/apm-server "golang.org/x/" and mattermost/mattermost
+	// "Github Actions updates".
+	for _, name := range []string{"go.opentelemetry.io", "k8s.io", "k8s-dependencies", "d3", "prod|dev", "a", "golang.org/x/", "GitHub Actions", ".leading", "trailing.", "-lead"} {
 		config := `version: 2
 updates:
   - package-ecosystem: npm
@@ -239,8 +242,8 @@ updates:
 		}
 	}
 
-	// Names that break the resulting Git branch name are still rejected.
-	for _, name := range []string{"GitHub Actions", ".leading", "trailing.", "-lead"} {
+	// Names that leave nothing to slugify are still rejected.
+	for _, name := range []string{"", " ", "---", "./"} {
 		config := `version: 2
 updates:
   - package-ecosystem: npm
@@ -655,5 +658,157 @@ updates:
 	ds := Lint(strings.NewReader(config))
 	if len(ds) != 1 || ds[0].Path != "updates[1].directories[1]" || ds[0].Message != "directory does not exist" || ds[0].Line != 9 {
 		t.Fatalf("got %#v", ds)
+	}
+}
+
+func TestLintMultiEcosystemGroupOptions(t *testing.T) {
+	// target-branch is a documented group-only option; open-pull-requests-limit
+	// and cooldown are undocumented but accepted by Dependabot.
+	config := `version: 2
+multi-ecosystem-groups:
+  all:
+    schedule:
+      interval: weekly
+    target-branch: main
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 3
+    commit-message:
+      prefix: deps
+    labels: [dependencies]
+updates:
+  - package-ecosystem: npm
+    directory: /
+    patterns: ["*"]
+    multi-ecosystem-group: all
+`
+	if ds := Lint(strings.NewReader(config)); len(ds) != 0 {
+		t.Fatalf("got %#v, want no diagnostics", ds)
+	}
+}
+
+func TestLintValidatesMultiEcosystemGroupOptions(t *testing.T) {
+	config := `version: 2
+multi-ecosystem-groups:
+  all:
+    commit-message:
+      assignees: [octocat]
+    open-pull-requests-limit: many
+updates:
+  - package-ecosystem: npm
+    directory: /
+    multi-ecosystem-group: all
+`
+	want := []string{
+		"multi-ecosystem-groups.all.schedule: required key is missing",
+		"multi-ecosystem-groups.all.commit-message.assignees: unknown key",
+		"multi-ecosystem-groups.all.open-pull-requests-limit: must be an integer",
+		"updates[0].patterns: is required with multi-ecosystem-group",
+	}
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != len(want) {
+		t.Fatalf("got %#v, want %q", ds, want)
+	}
+	for i, d := range ds {
+		if d.String() != want[i] {
+			t.Errorf("diagnostic %d = %q, want %q", i, d.String(), want[i])
+		}
+	}
+}
+
+func TestLintReportsRetiredReviewers(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    reviewers: [octocat]
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[0].reviewers" || !strings.Contains(ds[0].Message, "CODEOWNERS") {
+		t.Fatalf("got %#v", ds)
+	}
+}
+
+func TestLintIgnoreVersionsString(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      - dependency-name: actions/stale
+        versions: ">= 9"
+      - dependency-name: actions/cache
+        versions: [">= 4"]
+      - dependency-name: actions/checkout
+        versions: 4
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[0].ignore[2].versions" || ds[0].Message != "must be a string" {
+		t.Fatalf("got %#v", ds)
+	}
+}
+
+func TestLintGlobstarDirectories(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(".github", "actions", "setup"),
+		filepath.Join("src", "accounting"),
+		filepath.Join("images", "nginx", "rootfs"),
+		filepath.Join(".git", "objects", "rootfs"),
+	} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	config := `version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "**/*"
+      - "/.github/actions/**/*"
+      - "/src/accounting/**"
+      - "**/rootfs"
+      - "/images/**/root*"
+      - "/missing/**"
+      - "**/objects"
+      - "/src/**/[a"
+    schedule:
+      interval: weekly
+`
+	want := []string{
+		"updates[0].directories[5]: directory does not exist",
+		"updates[0].directories[6]: directory does not exist",
+		"updates[0].directories[7]: contains an invalid glob pattern",
+	}
+	ds := LintAt(strings.NewReader(config), root)
+	if len(ds) != len(want) {
+		t.Fatalf("got %#v, want %q", ds, want)
+	}
+	for i, d := range ds {
+		if d.String() != want[i] {
+			t.Errorf("diagnostic %d = %q, want %q", i, d.String(), want[i])
+		}
+	}
+}
+
+func TestLintScheduleCronjobsThatRarelyOrNeverRun(t *testing.T) {
+	// February 29th fires only in leap years, and February 30th never fires
+	// (sometimes used on purpose to disable scheduled updates).
+	for _, cronjob := range []string{"0 0 29 2 *", "0 0 30 2 *", "0 0 1 1 *", "34 3 25 * *"} {
+		config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: "` + cronjob + `"
+`
+		if ds := Lint(strings.NewReader(config)); len(ds) != 0 {
+			t.Errorf("cronjob %q: got %#v", cronjob, ds)
+		}
 	}
 }
