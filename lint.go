@@ -145,7 +145,7 @@ func (v *validator) update(n *yaml.Node, p string) {
 	if dirs != nil {
 		if v.stringList(dirs, p+".directories", true) {
 			for i, dir := range dirs.Content {
-				if dir.Kind == yaml.ScalarNode && dir.Tag == "!!str" {
+				if d := deref(dir); d.Kind == yaml.ScalarNode && d.Tag == "!!str" {
 					v.directory(dir, fmt.Sprintf("%s.directories[%d]", p, i), true)
 				}
 			}
@@ -198,7 +198,7 @@ func (v *validator) update(n *yaml.Node, p string) {
 		v.object(x, p+".commit-message", set("prefix", "prefix-development", "include"), func(k string, z *yaml.Node, q string) {
 			if k == "include" {
 				v.enum(z, q, set("scope"))
-			} else if v.string(z, q) && utf8.RuneCountInString(z.Value) > 50 {
+			} else if v.string(z, q) && utf8.RuneCountInString(deref(z).Value) > 50 {
 				v.add(z, q, "must not exceed 50 characters")
 			}
 		})
@@ -221,14 +221,15 @@ func (v *validator) update(n *yaml.Node, p string) {
 }
 
 func (v *validator) directory(n *yaml.Node, p string, allowGlob bool) {
-	if strings.Contains(n.Value, "..") {
+	dir := deref(n).Value
+	if strings.Contains(dir, "..") {
 		v.add(n, p, `must not include ".."`)
 		return
 	}
-	name := filepath.Join(v.root, filepath.FromSlash(strings.TrimPrefix(n.Value, "/")))
+	name := filepath.Join(v.root, filepath.FromSlash(strings.TrimPrefix(dir, "/")))
 	matches := []string{name}
-	if strings.ContainsAny(n.Value, "*?[") {
-		if !allowGlob && hasUnescapedGlobMeta(n.Value) {
+	if strings.ContainsAny(dir, "*?[") {
+		if !allowGlob && hasUnescapedGlobMeta(dir) {
 			v.add(n, p, "does not support glob patterns")
 			return
 		}
@@ -269,6 +270,7 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 	if !v.kind(n, yaml.MappingNode, p, "mapping") {
 		return
 	}
+	n = deref(n)
 	v.duplicates(n, p)
 	v.unknown(n, p, set("interval", "day", "time", "timezone", "cronjob"))
 	i := v.requiredString(n, "interval", p)
@@ -478,7 +480,7 @@ func (v *validator) cooldown(n, at *yaml.Node, p, eco string) {
 	v.object(n, p, set("default-days", "semver-major-days", "semver-minor-days", "semver-patch-days", "include", "exclude"), func(k string, z *yaml.Node, q string) {
 		if k == "include" || k == "exclude" {
 			v.stringList(z, q, false)
-			if len(z.Content) > 150 {
+			if len(deref(z).Content) > 150 {
 				v.add(z, q, "must contain at most 150 dependencies")
 			}
 		} else {
@@ -498,7 +500,7 @@ func (v *validator) branchName(n *yaml.Node, p string) {
 			v.enum(z, q, set("lowercase", "uppercase"))
 		case "max-length":
 			if v.integer(z, q) {
-				x, err := strconv.Atoi(z.Value)
+				x, err := strconv.Atoi(deref(z).Value)
 				if err != nil {
 					v.add(z, q, "must be a base-10 integer")
 					break
@@ -508,11 +510,11 @@ func (v *validator) branchName(n *yaml.Node, p string) {
 				}
 			}
 		case "prefix":
-			if v.string(z, q) && utf8.RuneCountInString(z.Value) > 50 {
+			if v.string(z, q) && utf8.RuneCountInString(deref(z).Value) > 50 {
 				v.add(z, q, "must not exceed 50 characters")
 			}
 		case "template":
-			if v.string(z, q) && utf8.RuneCountInString(z.Value) > 200 {
+			if v.string(z, q) && utf8.RuneCountInString(deref(z).Value) > 200 {
 				v.add(z, q, "must not exceed 200 characters")
 			}
 		}
@@ -553,8 +555,9 @@ func (v *validator) registryDefinitions(n *yaml.Node) {
 		} else {
 			v.string(typ, q+".type")
 		}
-		for j := 0; j < len(x.Content); j += 2 {
-			key, field := x.Content[j].Value, x.Content[j+1]
+		def := deref(x)
+		for j := 0; j < len(def.Content); j += 2 {
+			key, field := def.Content[j].Value, def.Content[j+1]
 			if key == "replaces-base" {
 				v.boolean(field, q+"."+key)
 			} else {
@@ -575,8 +578,8 @@ func (v *validator) registryRefs(n *yaml.Node, p string) {
 	}
 	for i, x := range n.Content {
 		q := fmt.Sprintf("%s[%d]", p, i)
-		if v.string(x, q) && x.Value != "*" && !v.registries[x.Value] {
-			v.add(x, q, "references undefined registry "+quote(x.Value))
+		if name := deref(x).Value; v.string(x, q) && name != "*" && !v.registries[name] {
+			v.add(x, q, "references undefined registry "+quote(name))
 		}
 	}
 }
@@ -598,6 +601,7 @@ func (v *validator) object(n *yaml.Node, p string, known map[string]bool, fn fun
 	if !v.kind(n, yaml.MappingNode, p, "mapping") {
 		return
 	}
+	n = deref(n)
 	v.duplicates(n, p)
 	v.unknown(n, p, known)
 	for i := 0; i < len(n.Content); i += 2 {
@@ -649,10 +653,11 @@ func (v *validator) stringList(n *yaml.Node, p string, nonempty bool) bool {
 	if !v.kind(n, yaml.SequenceNode, p, "sequence") {
 		return false
 	}
-	if nonempty && len(n.Content) == 0 {
+	items := deref(n).Content
+	if nonempty && len(items) == 0 {
 		v.add(n, p, "must not be empty")
 	}
-	for i, x := range n.Content {
+	for i, x := range items {
 		v.string(x, fmt.Sprintf("%s[%d]", p, i))
 	}
 	return true
@@ -661,24 +666,27 @@ func (v *validator) enumList(n *yaml.Node, p string, allowed map[string]bool) {
 	if !v.kind(n, yaml.SequenceNode, p, "sequence") {
 		return
 	}
-	for i, x := range n.Content {
+	for i, x := range deref(n).Content {
 		v.enum(x, fmt.Sprintf("%s[%d]", p, i), allowed)
 	}
 }
 func (v *validator) enum(n *yaml.Node, p string, a map[string]bool) {
-	if v.string(n, p) && !a[n.Value] {
+	if v.string(n, p) && !a[deref(n).Value] {
 		v.add(n, p, "must be one of "+keys(a))
 	}
 }
+
+// string, integer, boolean and the checks built on them look through an alias
+// but report at n, so a reused value is reported where it is reused.
 func (v *validator) string(n *yaml.Node, p string) bool {
-	if n.Kind != yaml.ScalarNode || n.Tag != "!!str" {
+	if x := deref(n); x.Kind != yaml.ScalarNode || x.Tag != "!!str" {
 		v.add(n, p, "must be a string")
 		return false
 	}
 	return true
 }
 func (v *validator) integer(n *yaml.Node, p string) bool {
-	if n.Kind != yaml.ScalarNode || n.Tag != "!!int" {
+	if x := deref(n); x.Kind != yaml.ScalarNode || x.Tag != "!!int" {
 		v.add(n, p, "must be an integer")
 		return false
 	}
@@ -686,7 +694,7 @@ func (v *validator) integer(n *yaml.Node, p string) bool {
 }
 func (v *validator) nonNegativeInt(n *yaml.Node, p string) {
 	if v.integer(n, p) {
-		x, err := strconv.Atoi(n.Value)
+		x, err := strconv.Atoi(deref(n).Value)
 		if err != nil {
 			v.add(n, p, "must be a base-10 integer")
 		} else if x < 0 {
@@ -695,7 +703,7 @@ func (v *validator) nonNegativeInt(n *yaml.Node, p string) {
 	}
 }
 func (v *validator) boolean(n *yaml.Node, p string) {
-	if n.Kind != yaml.ScalarNode || n.Tag != "!!bool" {
+	if x := deref(n); x.Kind != yaml.ScalarNode || x.Tag != "!!bool" {
 		v.add(n, p, "must be a boolean")
 	}
 }
