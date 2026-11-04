@@ -422,3 +422,93 @@ updates:
 		}
 	}
 }
+
+func TestLintEcosystemSpecificOptions(t *testing.T) {
+	tests := []struct {
+		eco, option, path string
+		supported         bool
+	}{
+		{"bundler", "vendor: true", "updates[0].vendor", true},
+		{"gomod", "vendor: true", "updates[0].vendor", true},
+		{"npm", "vendor: true", "updates[0].vendor", false},
+		{"npm", "versioning-strategy: increase", "updates[0].versioning-strategy", true},
+		{"helm", "versioning-strategy: increase", "updates[0].versioning-strategy", true},
+		{"gomod", "versioning-strategy: increase", "updates[0].versioning-strategy", false},
+		{"docker", "versioning-strategy: increase", "updates[0].versioning-strategy", false},
+		{"pip", "insecure-external-code-execution: allow", "updates[0].insecure-external-code-execution", true},
+		{"mix", "insecure-external-code-execution: allow", "updates[0].insecure-external-code-execution", true},
+		{"npm", "insecure-external-code-execution: allow", "updates[0].insecure-external-code-execution", false},
+		{"gomod", "allow: [{dependency-type: indirect}]", "updates[0].allow[0].dependency-type", true},
+		{"uv", "allow: [{dependency-type: indirect}]", "updates[0].allow[0].dependency-type", true},
+		{"npm", "allow: [{dependency-type: indirect}]", "updates[0].allow[0].dependency-type", false},
+		{"npm", "allow: [{dependency-type: all}]", "updates[0].allow[0].dependency-type", true},
+		{"docker", "allow: [{dependency-type: direct}]", "updates[0].allow[0].dependency-type", true},
+		{"npm", "cooldown: {semver-major-days: 7}", "updates[0].cooldown.semver-major-days", true},
+		{"mix", "cooldown: {semver-minor-days: 7}", "updates[0].cooldown.semver-minor-days", true},
+		{"github-actions", "cooldown: {semver-patch-days: 7}", "updates[0].cooldown.semver-patch-days", false},
+		{"docker", "cooldown: {semver-major-days: 7}", "updates[0].cooldown.semver-major-days", false},
+		{"docker", "cooldown: {default-days: 7}", "updates[0].cooldown.default-days", true},
+	}
+	for _, tt := range tests {
+		config := `version: 2
+updates:
+  - package-ecosystem: ` + tt.eco + `
+    directory: /
+    schedule:
+      interval: weekly
+    ` + tt.option + `
+`
+		ds := Lint(strings.NewReader(config))
+		if tt.supported {
+			if len(ds) != 0 {
+				t.Errorf("%s with %q: got %#v, want no diagnostics", tt.eco, tt.option, ds)
+			}
+			continue
+		}
+		if len(ds) != 1 || ds[0].Path != tt.path || !strings.HasSuffix(ds[0].Message, `not supported by package-ecosystem "`+tt.eco+`"`) {
+			t.Errorf("%s with %q: got %#v, want an unsupported diagnostic at %s", tt.eco, tt.option, ds, tt.path)
+		}
+	}
+}
+
+func TestLintEcosystemSpecificValueMessage(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    vendor: true
+    allow:
+      - dependency-type: indirect
+`
+	ds := Lint(strings.NewReader(config))
+	want := []string{
+		`updates[0].vendor: not supported by package-ecosystem "npm"`,
+		`updates[0].allow[0].dependency-type: "indirect" is not supported by package-ecosystem "npm"`,
+	}
+	if len(ds) != len(want) {
+		t.Fatalf("got %#v", ds)
+	}
+	for i, d := range ds {
+		if d.String() != want[i] || d.Line == 0 {
+			t.Errorf("got %#v, want %q", d, want[i])
+		}
+	}
+}
+
+func TestLintEcosystemSpecificOptionsSkipUnknownEcosystem(t *testing.T) {
+	// An unknown ecosystem is reported once; its options are not also flagged.
+	config := `version: 2
+updates:
+  - package-ecosystem: made-up
+    directory: /
+    schedule:
+      interval: weekly
+    vendor: true
+`
+	ds := Lint(strings.NewReader(config))
+	if len(ds) != 1 || ds[0].Path != "updates[0].package-ecosystem" {
+		t.Fatalf("got %#v", ds)
+	}
+}
