@@ -6,14 +6,14 @@ workflows:
     '.github/workflows/ci.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
-        - 'goreleaser/goreleaser-action@v7.2.3'
+        - 'goreleaser/goreleaser-action@v7.3.0'
     '.github/workflows/dependalint.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
     '.github/workflows/release.yaml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-go@v7.0.0'
-        - 'goreleaser/goreleaser-action@v7.2.3'
+        - 'goreleaser/goreleaser-action@v7.3.0'
         - 'peter-evans/create-pull-request@v8.1.1'
 dependencies:
     'actions/checkout@v7.0.1':
@@ -26,9 +26,9 @@ dependencies:
         commit: 'sha1-b7ad1dad31e06c5925ef5d2fc7ad053ef454303e'
         owner_id: 44036562
         repo_id: 192624594
-    'goreleaser/goreleaser-action@v7.2.3':
-        ref: 'v7.2.3'
-        commit: 'sha1-f06c13b6b1a9625abc9e6e439d9c05a8f2190e94'
+    'goreleaser/goreleaser-action@v7.3.0':
+        ref: 'v7.3.0'
+        commit: 'sha1-a4f02ab5355a589de60d917a659ce617ed19b3de'
         owner_id: 24697112
         repo_id: 209873006
     'peter-evans/create-pull-request@v8.1.1':
