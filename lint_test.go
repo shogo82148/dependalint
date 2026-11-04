@@ -514,21 +514,39 @@ updates:
 }
 
 func TestLintEcosystemSpecificOptionReportedAtAlias(t *testing.T) {
-	config := `version: 2
+	// The first update defines anchors that are valid for gomod; the second
+	// update reuses one of them. The diagnostic must point at the alias.
+	tests := []struct {
+		eco, use, path string
+	}{
+		{"npm", "vendor: *vendor", "updates[1].vendor"},
+		{"npm", "allow: *allow", "updates[1].allow[0].dependency-type"},
+		{"npm", "allow: [*rule]", "updates[1].allow[0].dependency-type"},
+		{"npm", "allow: [{dependency-type: *kind}]", "updates[1].allow[0].dependency-type"},
+		{"docker", "cooldown: *cooldown", "updates[1].cooldown.semver-major-days"},
+	}
+	for _, tt := range tests {
+		config := `version: 2
 updates:
-  - package-ecosystem: bundler
+  - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
     vendor: &vendor true
-  - package-ecosystem: npm
+    allow: &allow
+      - &rule
+        dependency-type: &kind indirect
+    cooldown: &cooldown
+      semver-major-days: 7
+  - package-ecosystem: ` + tt.eco + `
     directory: /
     schedule:
       interval: weekly
-    vendor: *vendor
+    ` + tt.use + `
 `
-	ds := Lint(strings.NewReader(config))
-	if len(ds) != 1 || ds[0].Path != "updates[1].vendor" || ds[0].Line != 12 {
-		t.Fatalf("got %#v, want one diagnostic at line 12", ds)
+		ds := Lint(strings.NewReader(config))
+		if len(ds) != 1 || ds[0].Path != tt.path || ds[0].Line != 17 || !strings.HasSuffix(ds[0].Message, `not supported by package-ecosystem "`+tt.eco+`"`) {
+			t.Errorf("%s: got %#v, want an unsupported diagnostic at %s on line 17", tt.use, ds, tt.path)
+		}
 	}
 }

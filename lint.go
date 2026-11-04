@@ -207,13 +207,13 @@ func (v *validator) update(n *yaml.Node, p string) {
 		v.branchName(x, p+".pull-request-branch-name")
 	}
 	if x := value(n, "cooldown"); x != nil {
-		v.cooldown(x, p+".cooldown", eco)
+		v.cooldown(x, rawValue(n, "cooldown"), p+".cooldown", eco)
 	}
 	if x := value(n, "allow"); x != nil {
-		v.rules(x, p+".allow", eco, true)
+		v.rules(x, rawValue(n, "allow"), p+".allow", eco, true)
 	}
 	if x := value(n, "ignore"); x != nil {
-		v.rules(x, p+".ignore", eco, false)
+		v.rules(x, rawValue(n, "ignore"), p+".ignore", eco, false)
 	}
 	if x := value(n, "groups"); x != nil {
 		v.updateGroups(x, p+".groups")
@@ -405,7 +405,7 @@ func cronScheduleRunsMoreThanDaily(schedule cron.Schedule) bool {
 	return false
 }
 
-func (v *validator) rules(n *yaml.Node, p, eco string, allow bool) {
+func (v *validator) rules(n, at *yaml.Node, p, eco string, allow bool) {
 	if !v.kind(n, yaml.SequenceNode, p, "sequence") {
 		return
 	}
@@ -420,20 +420,22 @@ func (v *validator) rules(n *yaml.Node, p, eco string, allow bool) {
 		if !v.kind(x, yaml.MappingNode, q, "mapping") {
 			continue
 		}
-		v.duplicates(x, q)
-		v.unknown(x, q, known)
-		if len(x.Content) == 0 {
+		rule := deref(x)
+		v.duplicates(rule, q)
+		v.unknown(rule, q, known)
+		if len(rule.Content) == 0 {
 			v.add(x, q, "rule must not be empty")
 		}
-		for j := 0; j < len(x.Content); j += 2 {
-			k, z := x.Content[j].Value, x.Content[j+1]
+		for j := 0; j < len(rule.Content); j += 2 {
+			k, raw := rule.Content[j].Value, rule.Content[j+1]
+			z := deref(raw)
 			switch k {
 			case "dependency-name":
 				v.string(z, q+"."+k)
 			case "dependency-type":
 				v.enum(z, q+"."+k, set("direct", "indirect", "all", "production", "development"))
 				if z.Tag == "!!str" && z.Value == "indirect" {
-					v.supportedBy(z, q+"."+k, eco, z.Value, indirectDependencyEcosystems)
+					v.supportedBy(aliasOr(at, aliasOr(x, aliasOr(raw, z))), q+"."+k, eco, z.Value, indirectDependencyEcosystems)
 				}
 			case "versions":
 				v.stringList(z, q+"."+k, false)
@@ -472,7 +474,7 @@ func (v *validator) updateGroups(n *yaml.Node, p string) {
 	}
 }
 
-func (v *validator) cooldown(n *yaml.Node, p, eco string) {
+func (v *validator) cooldown(n, at *yaml.Node, p, eco string) {
 	v.object(n, p, set("default-days", "semver-major-days", "semver-minor-days", "semver-patch-days", "include", "exclude"), func(k string, z *yaml.Node, q string) {
 		if k == "include" || k == "exclude" {
 			v.stringList(z, q, false)
@@ -482,7 +484,7 @@ func (v *validator) cooldown(n *yaml.Node, p, eco string) {
 		} else {
 			v.nonNegativeInt(z, q)
 			if k != "default-days" {
-				v.supportedBy(z, q, eco, "", semverCooldownEcosystems)
+				v.supportedBy(aliasOr(at, z), q, eco, "", semverCooldownEcosystems)
 			}
 		}
 	})
@@ -721,6 +723,15 @@ func rawValue(n *yaml.Node, key string) *yaml.Node {
 		}
 	}
 	return nil
+}
+
+// aliasOr returns at when it is an alias, so that a diagnostic about a reused
+// value points at where it is reused, and n otherwise.
+func aliasOr(at, n *yaml.Node) *yaml.Node {
+	if at != nil && at.Kind == yaml.AliasNode {
+		return at
+	}
+	return n
 }
 func deref(n *yaml.Node) *yaml.Node {
 	if n != nil && n.Kind == yaml.AliasNode {
