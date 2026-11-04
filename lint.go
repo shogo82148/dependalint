@@ -38,7 +38,7 @@ type validator struct {
 	root       string
 }
 
-var ecosystems = set("bazel", "bun", "bundler", "cargo", "composer", "conda", "deno", "devcontainers", "docker", "docker-compose", "dotnet-sdk", "elm", "github-actions", "gitsubmodule", "gomod", "gradle", "helm", "julia", "maven", "mix", "nix", "npm", "nuget", "opentofu", "pip", "pre-commit", "pub", "rust-toolchain", "sbt", "swift", "terraform", "uv", "vcpkg")
+var ecosystems = set("apm", "bazel", "bun", "bundler", "cargo", "composer", "conda", "deno", "devcontainers", "docker", "docker-compose", "dotnet-sdk", "elm", "github-actions", "gitsubmodule", "gomod", "gradle", "helm", "julia", "maven", "mix", "nix", "npm", "nuget", "opentofu", "pip", "pre-commit", "pub", "rust-toolchain", "sbt", "swift", "terraform", "uv", "vcpkg")
 var intervals = set("daily", "weekly", "monthly", "quarterly", "semiannually", "yearly", "cron")
 var weekdays = set("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
 var updateKeys = set("package-ecosystem", "directory", "directories", "schedule", "allow", "assignees", "commit-message", "cooldown", "groups", "ignore", "insecure-external-code-execution", "labels", "milestone", "multi-ecosystem-group", "open-pull-requests-limit", "patterns", "exclude-patterns", "pull-request-branch-name", "rebase-strategy", "registries", "target-branch", "exclude-paths", "vendor", "versioning-strategy")
