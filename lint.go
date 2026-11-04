@@ -50,6 +50,13 @@ var naturalCronIntervalPattern = regexp.MustCompile(`(?i)^every\s+(?:([1-9]\d*)\
 var fugitLastDayPattern = regexp.MustCompile(`(?i)^(?:L|last|-([1-9]|[12]\d|3[01])-(?:L|last))$`)
 var fugitWeekdayPattern = regexp.MustCompile(`(?i)^([0-7]|sun(?:day)?|mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?)(?:(?:#(?:[1-5]|-1|L|last))|(?:%[1-9]\d*(?:\+\d+)?))?$`)
 
+// Options that only some ecosystems support, per the Dependabot options reference.
+var vendorEcosystems = set("bundler", "gomod")
+var versioningStrategyEcosystems = set("bundler", "cargo", "composer", "helm", "mix", "npm", "pip", "pub", "uv")
+var insecureExternalCodeExecutionEcosystems = set("bundler", "mix", "pip")
+var indirectDependencyEcosystems = set("bundler", "cargo", "composer", "gomod", "pip", "uv")
+var semverCooldownEcosystems = set("apm", "bun", "bundler", "cargo", "composer", "conda", "deno", "dotnet-sdk", "elm", "gomod", "gradle", "julia", "maven", "mix", "npm", "nuget", "pip", "pub", "rust-toolchain", "sbt", "swift", "uv")
+
 // Lint reads and validates a Dependabot configuration. It returns all problems it can find.
 func Lint(r io.Reader) []Diagnostic {
 	return LintAt(r, ".")
@@ -116,9 +123,12 @@ func (v *validator) update(n *yaml.Node, p string) {
 	}
 	v.duplicates(n, p)
 	v.unknown(n, p, updateKeys)
-	eco := v.requiredString(n, "package-ecosystem", p)
-	if eco != nil && !ecosystems[eco.Value] {
-		v.add(eco, p+".package-ecosystem", "unsupported ecosystem "+quote(eco.Value))
+	var eco string
+	if x := v.requiredString(n, "package-ecosystem", p); x != nil {
+		eco = x.Value
+		if !ecosystems[eco] {
+			v.add(x, p+".package-ecosystem", "unsupported ecosystem "+quote(eco))
+		}
 	}
 	dir, dirs := value(n, "directory"), value(n, "directories")
 	if dir == nil && dirs == nil {
@@ -160,15 +170,18 @@ func (v *validator) update(n *yaml.Node, p string) {
 	}
 	if x := value(n, "vendor"); x != nil {
 		v.boolean(x, p+".vendor")
+		v.supportedBy(rawValue(n, "vendor"), p+".vendor", eco, "", vendorEcosystems)
 	}
 	if x := value(n, "insecure-external-code-execution"); x != nil {
 		v.enum(x, p+".insecure-external-code-execution", set("allow"))
+		v.supportedBy(rawValue(n, "insecure-external-code-execution"), p+".insecure-external-code-execution", eco, "", insecureExternalCodeExecutionEcosystems)
 	}
 	if x := value(n, "rebase-strategy"); x != nil {
 		v.enum(x, p+".rebase-strategy", set("auto", "disabled"))
 	}
 	if x := value(n, "versioning-strategy"); x != nil {
 		v.enum(x, p+".versioning-strategy", set("auto", "increase", "increase-if-necessary", "lockfile-only", "widen"))
+		v.supportedBy(rawValue(n, "versioning-strategy"), p+".versioning-strategy", eco, "", versioningStrategyEcosystems)
 	}
 	if x := value(n, "target-branch"); x != nil {
 		v.string(x, p+".target-branch")
@@ -194,13 +207,13 @@ func (v *validator) update(n *yaml.Node, p string) {
 		v.branchName(x, p+".pull-request-branch-name")
 	}
 	if x := value(n, "cooldown"); x != nil {
-		v.cooldown(x, p+".cooldown")
+		v.cooldown(x, rawValue(n, "cooldown"), p+".cooldown", eco)
 	}
 	if x := value(n, "allow"); x != nil {
-		v.rules(x, p+".allow", true)
+		v.rules(x, rawValue(n, "allow"), p+".allow", eco, true)
 	}
 	if x := value(n, "ignore"); x != nil {
-		v.rules(x, p+".ignore", false)
+		v.rules(x, rawValue(n, "ignore"), p+".ignore", eco, false)
 	}
 	if x := value(n, "groups"); x != nil {
 		v.updateGroups(x, p+".groups")
@@ -392,7 +405,7 @@ func cronScheduleRunsMoreThanDaily(schedule cron.Schedule) bool {
 	return false
 }
 
-func (v *validator) rules(n *yaml.Node, p string, allow bool) {
+func (v *validator) rules(n, at *yaml.Node, p, eco string, allow bool) {
 	if !v.kind(n, yaml.SequenceNode, p, "sequence") {
 		return
 	}
@@ -407,18 +420,23 @@ func (v *validator) rules(n *yaml.Node, p string, allow bool) {
 		if !v.kind(x, yaml.MappingNode, q, "mapping") {
 			continue
 		}
-		v.duplicates(x, q)
-		v.unknown(x, q, known)
-		if len(x.Content) == 0 {
+		rule := deref(x)
+		v.duplicates(rule, q)
+		v.unknown(rule, q, known)
+		if len(rule.Content) == 0 {
 			v.add(x, q, "rule must not be empty")
 		}
-		for j := 0; j < len(x.Content); j += 2 {
-			k, z := x.Content[j].Value, x.Content[j+1]
+		for j := 0; j < len(rule.Content); j += 2 {
+			k, raw := rule.Content[j].Value, rule.Content[j+1]
+			z := deref(raw)
 			switch k {
 			case "dependency-name":
 				v.string(z, q+"."+k)
 			case "dependency-type":
 				v.enum(z, q+"."+k, set("direct", "indirect", "all", "production", "development"))
+				if z.Tag == "!!str" && z.Value == "indirect" {
+					v.supportedBy(aliasOr(at, aliasOr(x, aliasOr(raw, z))), q+"."+k, eco, z.Value, indirectDependencyEcosystems)
+				}
 			case "versions":
 				v.stringList(z, q+"."+k, false)
 			case "update-types":
@@ -456,7 +474,7 @@ func (v *validator) updateGroups(n *yaml.Node, p string) {
 	}
 }
 
-func (v *validator) cooldown(n *yaml.Node, p string) {
+func (v *validator) cooldown(n, at *yaml.Node, p, eco string) {
 	v.object(n, p, set("default-days", "semver-major-days", "semver-minor-days", "semver-patch-days", "include", "exclude"), func(k string, z *yaml.Node, q string) {
 		if k == "include" || k == "exclude" {
 			v.stringList(z, q, false)
@@ -465,6 +483,9 @@ func (v *validator) cooldown(n *yaml.Node, p string) {
 			}
 		} else {
 			v.nonNegativeInt(z, q)
+			if k != "default-days" {
+				v.supportedBy(aliasOr(at, z), q, eco, "", semverCooldownEcosystems)
+			}
 		}
 	})
 }
@@ -558,6 +579,19 @@ func (v *validator) registryRefs(n *yaml.Node, p string) {
 			v.add(x, q, "references undefined registry "+quote(x.Value))
 		}
 	}
+}
+
+// supportedBy reports n when eco is a known ecosystem that is not in supported.
+// A non-empty val names the unsupported value rather than the option itself.
+func (v *validator) supportedBy(n *yaml.Node, p, eco, val string, supported map[string]bool) {
+	if !ecosystems[eco] || supported[eco] {
+		return
+	}
+	msg := "not supported by package-ecosystem " + quote(eco)
+	if val != "" {
+		msg = quote(val) + " is " + msg
+	}
+	v.add(n, p, msg)
 }
 
 func (v *validator) object(n *yaml.Node, p string, known map[string]bool, fn func(string, *yaml.Node, string)) {
@@ -676,13 +710,28 @@ func (v *validator) add(n *yaml.Node, p, msg string) {
 	v.diags = append(v.diags, Diagnostic{Line: n.Line, Column: n.Column, Path: p, Message: msg})
 }
 func value(n *yaml.Node, key string) *yaml.Node {
+	return deref(rawValue(n, key))
+}
+
+// rawValue is like value but does not resolve an alias value, so diagnostics
+// can point at the alias rather than at its anchor.
+func rawValue(n *yaml.Node, key string) *yaml.Node {
 	n = deref(n)
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		if n.Content[i].Value == key {
-			return deref(n.Content[i+1])
+			return n.Content[i+1]
 		}
 	}
 	return nil
+}
+
+// aliasOr returns at when it is an alias, so that a diagnostic about a reused
+// value points at where it is reused, and n otherwise.
+func aliasOr(at, n *yaml.Node) *yaml.Node {
+	if at != nil && at.Kind == yaml.AliasNode {
+		return at
+	}
+	return n
 }
 func deref(n *yaml.Node) *yaml.Node {
 	if n != nil && n.Kind == yaml.AliasNode {
