@@ -508,7 +508,7 @@ func normalizeFugitCron(s string) (string, bool) {
 // Schedules that never match (such as February 30th) are not too frequent.
 func cronScheduleRunsMoreThanDaily(schedule cron.Schedule) bool {
 	spec, ok := schedule.(*cron.SpecSchedule)
-	if !ok {
+	if !ok || spec.Next(time.Now()).IsZero() {
 		return false
 	}
 	const starBit = 1 << 63

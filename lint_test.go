@@ -813,7 +813,7 @@ updates:
 func TestLintScheduleCronjobsThatRarelyOrNeverRun(t *testing.T) {
 	// February 29th fires only in leap years, and February 30th never fires
 	// (sometimes used on purpose to disable scheduled updates).
-	for _, cronjob := range []string{"0 0 29 2 *", "0 0 30 2 *", "0 0 1 1 *", "34 3 25 * *"} {
+	for _, cronjob := range []string{"0 0 29 2 *", "0 0 30 2 *", "0,30 0 30 2 *", "0 0 1 1 *", "34 3 25 * *"} {
 		config := `version: 2
 updates:
   - package-ecosystem: npm
