@@ -795,6 +795,21 @@ updates:
 	}
 }
 
+func TestLintGlobstarMatchesRootDirectory(t *testing.T) {
+	config := `version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "**/*"
+      - "/**"
+    schedule:
+      interval: weekly
+`
+	if ds := LintAt(strings.NewReader(config), t.TempDir()); len(ds) != 0 {
+		t.Fatalf("got %#v, want no diagnostics", ds)
+	}
+}
+
 func TestLintScheduleCronjobsThatRarelyOrNeverRun(t *testing.T) {
 	// February 29th fires only in leap years, and February 30th never fires
 	// (sometimes used on purpose to disable scheduled updates).

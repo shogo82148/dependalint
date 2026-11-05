@@ -276,6 +276,10 @@ func globSegments(pattern string) []string {
 // segments, where a "**" segment matches zero or more directories.
 // filepath.Glob has no globstar support, so the tree is walked instead.
 func globstarExists(root string, segs []string) (bool, error) {
+	// "**/*" also matches the root directory, so it is equivalent to "**".
+	if slices.Equal(segs, []string{"**", "*"}) {
+		segs = []string{"**"}
+	}
 	for _, s := range segs {
 		if _, err := path.Match(s, ""); err != nil {
 			return false, err
