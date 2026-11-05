@@ -4,13 +4,17 @@ import (
 	"cmp"
 	"fmt"
 	"io"
+	"io/fs"
+	"math/bits"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -41,9 +45,9 @@ type validator struct {
 var ecosystems = set("apm", "bazel", "bun", "bundler", "cargo", "composer", "conda", "deno", "devcontainers", "docker", "docker-compose", "dotnet-sdk", "elm", "github-actions", "gitsubmodule", "gomod", "gradle", "helm", "julia", "maven", "mix", "nix", "npm", "nuget", "opentofu", "pip", "pre-commit", "pub", "rust-toolchain", "sbt", "swift", "terraform", "uv", "vcpkg")
 var intervals = set("daily", "weekly", "monthly", "quarterly", "semiannually", "yearly", "cron")
 var weekdays = set("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
-var updateKeys = set("package-ecosystem", "directory", "directories", "schedule", "allow", "assignees", "commit-message", "cooldown", "groups", "ignore", "insecure-external-code-execution", "labels", "milestone", "multi-ecosystem-group", "open-pull-requests-limit", "patterns", "exclude-patterns", "pull-request-branch-name", "rebase-strategy", "registries", "target-branch", "exclude-paths", "vendor", "versioning-strategy")
+var updateKeys = set("package-ecosystem", "directory", "directories", "schedule", "allow", "assignees", "commit-message", "cooldown", "groups", "ignore", "insecure-external-code-execution", "labels", "milestone", "multi-ecosystem-group", "open-pull-requests-limit", "patterns", "exclude-patterns", "pull-request-branch-name", "rebase-strategy", "registries", "reviewers", "target-branch", "exclude-paths", "vendor", "versioning-strategy")
 var timePattern = regexp.MustCompile(`^(?:[01]\d|2[0-3]):[0-5]\d$`)
-var groupNamePattern = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9._|-]*[A-Za-z0-9])?$`)
+var groupNamePattern = regexp.MustCompile(`[A-Za-z0-9]`)
 var cronParser = cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
 var naturalCronPattern = regexp.MustCompile(`(?i)^every\s+(?:(?:(?:day|weekday)|(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)(?:\s+(?:and|or)\s+(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?))*)\s+at\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|noon|midnight|(?:[01]?\d|2[0-3])(?::[0-5]\d)?|(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*[ap]m)|(?:[1-9]\d*\s+)?(?:minute|hour|day|week|month)s?)$`)
 var naturalCronIntervalPattern = regexp.MustCompile(`(?i)^every\s+(?:([1-9]\d*)\s+)?(minute|hour)s?$`)
@@ -193,15 +197,15 @@ func (v *validator) update(n *yaml.Node, p string) {
 		if v.string(x, p+".multi-ecosystem-group") && !v.groups[x.Value] {
 			v.add(x, p+".multi-ecosystem-group", "references an undefined multi-ecosystem group")
 		}
+		if value(n, "patterns") == nil {
+			v.add(n, p+".patterns", "is required with multi-ecosystem-group")
+		}
+	}
+	if k := keyNode(n, "reviewers"); k != nil {
+		v.add(k, p+".reviewers", retiredReviewers)
 	}
 	if x := value(n, "commit-message"); x != nil {
-		v.object(x, p+".commit-message", set("prefix", "prefix-development", "include"), func(k string, z *yaml.Node, q string) {
-			if k == "include" {
-				v.enum(z, q, set("scope"))
-			} else if v.string(z, q) && utf8.RuneCountInString(deref(z).Value) > 50 {
-				v.add(z, q, "must not exceed 50 characters")
-			}
-		})
+		v.commitMessage(x, p+".commit-message")
 	}
 	if x := value(n, "pull-request-branch-name"); x != nil {
 		v.branchName(x, p+".pull-request-branch-name")
@@ -233,6 +237,16 @@ func (v *validator) directory(n *yaml.Node, p string, allowGlob bool) {
 			v.add(n, p, "does not support glob patterns")
 			return
 		}
+		segs := globSegments(dir)
+		if slices.Contains(segs, "**") {
+			found, err := globstarExists(v.root, segs)
+			if err != nil {
+				v.add(n, p, "contains an invalid glob pattern")
+			} else if !found {
+				v.add(n, p, "directory does not exist")
+			}
+			return
+		}
 		var err error
 		matches, err = filepath.Glob(name)
 		if err != nil {
@@ -246,6 +260,87 @@ func (v *validator) directory(n *yaml.Node, p string, allowGlob bool) {
 		}
 	}
 	v.add(n, p, "directory does not exist")
+}
+
+func globSegments(pattern string) []string {
+	var segs []string
+	for _, s := range strings.Split(pattern, "/") {
+		if s != "" {
+			segs = append(segs, s)
+		}
+	}
+	return segs
+}
+
+// globstarExists reports whether a directory under root matches the glob
+// segments, where a "**" segment matches zero or more directories.
+// filepath.Glob has no globstar support, so the tree is walked instead.
+func globstarExists(root string, segs []string) (bool, error) {
+	// "**/*" also matches the root directory, so it is equivalent to "**".
+	if slices.Equal(segs, []string{"**", "*"}) {
+		segs = []string{"**"}
+	}
+	for _, s := range segs {
+		if _, err := path.Match(s, ""); err != nil {
+			return false, err
+		}
+	}
+	found := false
+	filepath.WalkDir(root, func(name string, d fs.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		var parts []string
+		if rel, _ := filepath.Rel(root, name); rel != "." {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			parts = strings.Split(filepath.ToSlash(rel), "/")
+		}
+		if matchGlobSegments(segs, parts) {
+			found = true
+			return filepath.SkipAll
+		}
+		if !matchGlobPrefix(segs, parts) {
+			return filepath.SkipDir
+		}
+		return nil
+	})
+	return found, nil
+}
+
+func matchGlobSegments(segs, parts []string) bool {
+	if len(segs) == 0 {
+		return len(parts) == 0
+	}
+	if segs[0] == "**" {
+		for i := 0; i <= len(parts); i++ {
+			if matchGlobSegments(segs[1:], parts[i:]) {
+				return true
+			}
+		}
+		return false
+	}
+	if len(parts) == 0 {
+		return false
+	}
+	ok, _ := path.Match(segs[0], parts[0])
+	return ok && matchGlobSegments(segs[1:], parts[1:])
+}
+
+// matchGlobPrefix reports whether a descendant of parts could still match segs.
+func matchGlobPrefix(segs, parts []string) bool {
+	if len(parts) == 0 {
+		return true
+	}
+	if len(segs) == 0 {
+		return false
+	}
+	if segs[0] == "**" {
+		return true
+	}
+	ok, _ := path.Match(segs[0], parts[0])
+	return ok && matchGlobPrefix(segs[1:], parts[1:])
 }
 
 func hasUnescapedGlobMeta(s string) bool {
@@ -307,12 +402,24 @@ func (v *validator) schedule(n *yaml.Node, p string) {
 	}
 	if z := value(n, "timezone"); z != nil {
 		if v.string(z, p+".timezone") {
-			_, err := time.LoadLocation(z.Value)
-			if z.Value == "" || z.Value == "Local" || err != nil {
+			if z.Value == "" || z.Value == "Local" || !validTimezone(z.Value) {
 				v.add(z, p+".timezone", "must be a valid time zone database identifier")
 			}
 		}
 	}
+}
+
+var timezones sync.Map
+
+// validTimezone caches time.LoadLocation, which re-reads the zoneinfo
+// database on every call.
+func validTimezone(name string) bool {
+	if ok, found := timezones.Load(name); found {
+		return ok.(bool)
+	}
+	_, err := time.LoadLocation(name)
+	timezones.Store(name, err == nil)
+	return err == nil
 }
 
 func validateCronjob(s string) string {
@@ -394,17 +501,18 @@ func normalizeFugitCron(s string) (string, bool) {
 	return strings.Join(fields, " "), true
 }
 
+// cronScheduleRunsMoreThanDaily reports whether a schedule can fire twice
+// within 24 hours. Minute and hour fields apply to every matching day, so
+// that happens exactly when a day has more than one firing time; with a
+// single time per day, consecutive runs are always whole days apart.
+// Schedules that never match (such as February 30th) are not too frequent.
 func cronScheduleRunsMoreThanDaily(schedule cron.Schedule) bool {
-	const occurrencesToCheck = 4096
-	previous := schedule.Next(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
-	for range occurrencesToCheck {
-		next := schedule.Next(previous)
-		if next.Sub(previous) < 24*time.Hour {
-			return true
-		}
-		previous = next
+	spec, ok := schedule.(*cron.SpecSchedule)
+	if !ok || spec.Next(time.Now()).IsZero() {
+		return false
 	}
-	return false
+	const starBit = 1 << 63
+	return bits.OnesCount64(spec.Minute&^starBit)*bits.OnesCount64(spec.Hour&^starBit) > 1
 }
 
 func (v *validator) rules(n, at *yaml.Node, p, eco string, allow bool) {
@@ -440,7 +548,12 @@ func (v *validator) rules(n, at *yaml.Node, p, eco string, allow bool) {
 					v.supportedBy(aliasOr(at, aliasOr(x, aliasOr(raw, z))), q+"."+k, eco, z.Value, indirectDependencyEcosystems)
 				}
 			case "versions":
-				v.stringList(z, q+"."+k, false)
+				// Dependabot accepts a single version requirement as well as a list.
+				if z.Kind != yaml.ScalarNode {
+					v.stringList(z, q+"."+k, false)
+				} else {
+					v.string(z, q+"."+k)
+				}
 			case "update-types":
 				v.enumList(z, q+"."+k, set("version-update:semver-patch", "version-update:semver-minor", "version-update:semver-major"))
 			}
@@ -456,8 +569,11 @@ func (v *validator) updateGroups(n *yaml.Node, p string) {
 	for i := 0; i < len(n.Content); i += 2 {
 		k, x := n.Content[i], n.Content[i+1]
 		q := p + "." + k.Value
+		// Dependabot slugifies the identifier for branch names and PR titles
+		// (e.g. "golang.org/x/" becomes "golang-org-x"), so spaces, slashes
+		// and other punctuation are fine as long as something survives.
 		if !groupNamePattern.MatchString(k.Value) {
-			v.add(k, q, "group identifier must start and end with a letter or digit and contain only letters, digits, ., |, _, or -")
+			v.add(k, q, "group identifier must contain at least one letter or digit")
 		}
 		v.object(x, q, set("applies-to", "dependency-type", "exclude-patterns", "group-by", "patterns", "update-types"), func(key string, z *yaml.Node, r string) {
 			switch key {
@@ -474,6 +590,18 @@ func (v *validator) updateGroups(n *yaml.Node, p string) {
 			}
 		})
 	}
+}
+
+const retiredReviewers = "has been retired; use a CODEOWNERS file to request reviews instead"
+
+func (v *validator) commitMessage(n *yaml.Node, p string) {
+	v.object(n, p, set("prefix", "prefix-development", "include"), func(k string, z *yaml.Node, q string) {
+		if k == "include" {
+			v.enum(z, q, set("scope"))
+		} else if (k == "prefix" || k == "prefix-development") && v.string(z, q) && utf8.RuneCountInString(deref(z).Value) > 50 {
+			v.add(z, q, "must not exceed 50 characters")
+		}
+	})
 }
 
 func (v *validator) cooldown(n, at *yaml.Node, p, eco string) {
@@ -530,11 +658,31 @@ func (v *validator) multiGroups(n *yaml.Node) {
 		k, x := n.Content[i], n.Content[i+1]
 		v.groups[k.Value] = true
 		q := "multi-ecosystem-groups." + k.Value
-		v.object(x, q, set("schedule", "commit-message", "pull-request-branch-name", "labels", "assignees", "milestone"), func(key string, z *yaml.Node, r string) {
-			if key == "schedule" {
+		// open-pull-requests-limit and cooldown are undocumented for groups,
+		// but Dependabot accepts them in practice.
+		v.object(x, q, set("schedule", "commit-message", "pull-request-branch-name", "labels", "assignees", "milestone", "target-branch", "open-pull-requests-limit", "cooldown", "reviewers"), func(key string, z *yaml.Node, r string) {
+			switch key {
+			case "schedule":
 				v.schedule(z, r)
+			case "commit-message":
+				v.commitMessage(z, r)
+			case "pull-request-branch-name":
+				v.branchName(z, r)
+			case "labels", "assignees":
+				v.stringList(z, r, false)
+			case "milestone", "open-pull-requests-limit":
+				v.nonNegativeInt(z, r)
+			case "target-branch":
+				v.string(z, r)
+			case "cooldown":
+				v.cooldown(z, z, r, "")
+			case "reviewers":
+				v.add(keyNode(x, "reviewers"), r, retiredReviewers)
 			}
 		})
+		if deref(x).Kind == yaml.MappingNode && value(x, "schedule") == nil {
+			v.add(x, q+".schedule", "required key is missing")
+		}
 	}
 }
 func (v *validator) registryDefinitions(n *yaml.Node) {
@@ -740,6 +888,15 @@ func aliasOr(at, n *yaml.Node) *yaml.Node {
 		return at
 	}
 	return n
+}
+func keyNode(n *yaml.Node, k string) *yaml.Node {
+	n = deref(n)
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == k {
+			return n.Content[i]
+		}
+	}
+	return nil
 }
 func deref(n *yaml.Node) *yaml.Node {
 	if n != nil && n.Kind == yaml.AliasNode {
