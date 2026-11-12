@@ -61,7 +61,7 @@ jobs:
       - name: Regenerate install.sh
         run: binst gen --config .config/binstaller.yml -o install.sh
       - name: Create pull request
-        uses: peter-evans/create-pull-request@v8.1.1
+        uses: peter-evans/create-pull-request@v8.1.2
         with:
           base: main
           add-paths: |
